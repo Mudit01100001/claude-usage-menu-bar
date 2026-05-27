@@ -74,6 +74,17 @@ The app runs as a status-item accessory (`LSUIElement`), meaning it resides excl
 
 ---
 
+## Important Notes & Troubleshooting
+
+* **Will the app ask for my Keychain password every time?**
+  * **No.** When macOS prompts you to authorize keychain access for the Claude Code credentials scan, make sure to click **"Always Allow"** (not just "Allow"). This adds the compiled app binary to the keychain item's Access Control list, so macOS will never prompt you again.
+* **Does the Claude Code CLI need to be running?**
+  * **No.** The app only reads the OAuth token generated when you ran `claude login` in the terminal. The CLI does not need to be active, and your terminal can be completely closed.
+* **Why did the refresh fail or not update?**
+  * If the app fails to retrieve data, check the Connections tab in Settings. Ensure the session is verified and not expired. For the Web Session Key, cookies typically expire after several weeks, requiring a fresh key from the browser. For the CLI, if the token is revoked, running `claude logout` followed by `claude login` in the terminal will refresh the system Keychain credentials.
+
+---
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

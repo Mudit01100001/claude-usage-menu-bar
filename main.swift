@@ -246,31 +246,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         switch appState.displayMode {
         case "stacked":
             // Two-line stacked display like Macs Fan Control
+            let style = NSMutableParagraphStyle()
+            style.alignment = appState.showMenuBarIcon ? .left : .center
+            style.lineHeightMultiple = 0.85
+            style.minimumLineHeight = 9.0
+            style.maximumLineHeight = 10.0
+            
             if !hasData {
-                let style = NSMutableParagraphStyle()
-                style.alignment = appState.showMenuBarIcon ? .left : .center
-                style.lineHeightMultiple = 0.88
                 let attrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium),
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold),
                     .foregroundColor: NSColor.secondaryLabelColor,
-                    .paragraphStyle: style
+                    .paragraphStyle: style,
+                    .baselineOffset: -2.0
                 ]
-                button.attributedTitle = NSAttributedString(string: "S: --%\nW: --%", attributes: attrs)
+                button.attributedTitle = NSAttributedString(string: "S: --% \nW: --% ", attributes: attrs)
             } else {
-                let style = NSMutableParagraphStyle()
-                style.alignment = appState.showMenuBarIcon ? .left : .center
-                style.lineHeightMultiple = 0.88
-                
                 let text = NSMutableAttributedString()
-                text.append(NSAttributedString(string: "S:\(sessionPct)%\n", attributes: [
+                text.append(NSAttributedString(string: "S:\(sessionPct)% \n", attributes: [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .bold),
                     .foregroundColor: colorForUtilization(Double(sessionPct)),
-                    .paragraphStyle: style
+                    .paragraphStyle: style,
+                    .baselineOffset: -1.5
                 ]))
-                text.append(NSAttributedString(string: "W:\(weeklyPct)%", attributes: [
+                text.append(NSAttributedString(string: "W:\(weeklyPct)% ", attributes: [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium),
                     .foregroundColor: colorForUtilization(Double(weeklyPct)),
-                    .paragraphStyle: style
+                    .paragraphStyle: style,
+                    .baselineOffset: -2.0
                 ]))
                 button.attributedTitle = text
             }

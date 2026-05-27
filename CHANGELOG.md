@@ -4,6 +4,19 @@ All notable changes to the Claude Usage macOS Menu Bar App will be documented in
 
 ---
 
+## [1.2.0] - 2026-05-27
+
+### Fixed
+- **Widget Gallery:** Replaced deprecated `.background()` with `.containerBackground(for: .widget)` — the mandatory WidgetKit API for macOS 14 Sonoma that allows widgets to appear in the Widget Gallery.
+- **Duplicate App Icons:** Cleaned up stale Launch Services registrations from test build directories causing multiple `ClaudeUsage` icons in Launchpad.
+- **Build Target:** Updated compilation target to `arm64-apple-macosx14.0` for both app and widget targets, eliminating deprecation warnings.
+
+### Added
+- **Release Automation (`release.py`):** New Python script that auto-generates semantic version tags, categorizes commits by type, updates `CHANGELOG.md`, commits/pushes, and publishes GitHub releases — either via the API (with `GITHUB_TOKEN`) or by opening a pre-filled browser page.
+- **Polished README:** Complete documentation overhaul with badges, feature and security tables, widget setup guide, and troubleshooting section.
+
+---
+
 ## [1.1.0] - 2026-05-27
 
 ### Added

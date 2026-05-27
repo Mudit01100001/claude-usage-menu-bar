@@ -179,9 +179,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
     // MARK: - Menu Bar Icon
     
     func createMenuBarIcon() -> NSImage {
-        let size = NSSize(width: 12, height: 12)
+        let size = NSSize(width: 14, height: 14)
         let image = NSImage(size: size, flipped: false) { rect in
-            let font = NSFont.systemFont(ofSize: 10, weight: .heavy)
+            let font = NSFont.systemFont(ofSize: 11, weight: .heavy)
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: NSColor.black
@@ -240,6 +240,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
             button.imagePosition = .imageLeft
         } else {
             button.image = nil
+            button.imagePosition = .noImage
         }
         
         switch appState.displayMode {
@@ -247,7 +248,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
             // Two-line stacked display like Macs Fan Control
             if !hasData {
                 let style = NSMutableParagraphStyle()
-                style.alignment = .left
+                style.alignment = appState.showMenuBarIcon ? .left : .center
                 style.lineHeightMultiple = 0.88
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium),
@@ -257,7 +258,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                 button.attributedTitle = NSAttributedString(string: "S: --%\nW: --%", attributes: attrs)
             } else {
                 let style = NSMutableParagraphStyle()
-                style.alignment = .left
+                style.alignment = appState.showMenuBarIcon ? .left : .center
                 style.lineHeightMultiple = 0.88
                 
                 let text = NSMutableAttributedString()

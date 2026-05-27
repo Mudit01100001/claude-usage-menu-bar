@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import Security
 import ServiceManagement
+import WidgetKit
 
 class AppState: ObservableObject {
     
@@ -434,6 +435,9 @@ class AppState: ObservableObject {
                     UserDefaults.standard.set(encoded, forKey: "cachedBuckets")
                 }
                 UserDefaults.standard.set(self.lastFetchTime, forKey: "lastFetchTime")
+                
+                // Export data to shared App Group for WidgetKit widget
+                self.updateSharedWidgetData()
             }
         } catch {
             updateStateWithError("Failed to parse usage data: \(error.localizedDescription)")
@@ -463,6 +467,47 @@ class AppState: ObservableObject {
             DispatchQueue.main.async {
                 self.launchAtLogin = enabled
             }
+        }
+    }
+    
+    private func updateSharedWidgetData() {
+        let session = self.usageBuckets.first(where: { $0.name == "five_hour" })
+        let weekly = self.usageBuckets.first(where: { $0.name == "seven_day" })
+        
+        let sessionUtil = session?.utilization ?? 0.0
+        let sessionTime = session?.timeRemainingString ?? "No data"
+        let weeklyUtil = weekly?.utilization ?? 0.0
+        let weeklyTime = weekly?.timeRemainingString ?? "No data"
+        
+        struct SharedUsageInfo: Codable {
+            let sessionUtilization: Double
+            let sessionTimeRemaining: String
+            let weeklyUtilization: Double
+            let weeklyTimeRemaining: String
+        }
+        
+        let info = SharedUsageInfo(
+            sessionUtilization: sessionUtil,
+            sessionTimeRemaining: sessionTime,
+            weeklyUtilization: weeklyUtil,
+            weeklyTimeRemaining: weeklyTime
+        )
+        
+        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.Mudit01100001.claude-usage") else {
+            return
+        }
+        
+        // Ensure shared container directory exists
+        try? FileManager.default.createDirectory(at: containerURL, withIntermediateDirectories: true, attributes: nil)
+        
+        let fileURL = containerURL.appendingPathComponent("usage.json")
+        do {
+            let data = try JSONEncoder().encode(info)
+            try data.write(to: fileURL)
+            // Signal WidgetKit to refresh all timeline widgets immediately
+            WidgetCenter.shared.reloadAllTimelines()
+        } catch {
+            print("Failed to write widget data: \(error)")
         }
     }
 }

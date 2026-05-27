@@ -1,0 +1,13 @@
+# Compiled executable
+ClaudeUsage
+
+# Compiled app bundle
+ClaudeUsage.app/
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Input reference directory (browser extension reference)
+claude-usage-extension-main/

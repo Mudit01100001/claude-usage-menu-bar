@@ -16,7 +16,7 @@ echo "SDK Path: $SDK_PATH"
 echo "Compiling main App Swift source files..."
 swiftc -O \
        -sdk "$SDK_PATH" \
-       -target arm64-apple-macosx13.0 \
+       -target arm64-apple-macosx14.0 \
        KeychainHelper.swift AppState.swift SettingsView.swift main.swift \
        -o ClaudeUsage
 
@@ -43,7 +43,7 @@ chmod +x ClaudeUsage.app/Contents/MacOS/ClaudeUsage
 echo "Compiling Widget Extension Swift source files..."
 swiftc -O \
        -sdk "$SDK_PATH" \
-       -target arm64-apple-macosx13.0 \
+       -target arm64-apple-macosx14.0 \
        -parse-as-library \
        ClaudeUsageWidget.swift \
        -o ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex/Contents/MacOS/ClaudeUsageWidget

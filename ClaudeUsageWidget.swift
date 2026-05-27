@@ -165,10 +165,9 @@ struct ClaudeUsageWidgetEntryView : View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(NSColor.windowBackgroundColor).opacity(0.5))
-        )
+        .containerBackground(for: .widget) {
+            Color(NSColor.windowBackgroundColor).opacity(0.5)
+        }
     }
 }
 

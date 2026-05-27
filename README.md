@@ -1,90 +1,180 @@
-# Claude Usage macOS Menu Bar App
+<h1 align="center">
+  <br>
+  <img src="https://img.shields.io/badge/macOS-14%2B-black?style=flat-square&logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/Swift-5.9-FA7343?style=flat-square&logo=swift&logoColor=white" alt="Swift">
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License">
+  <img src="https://img.shields.io/github/v/release/Mudit01100001/claude-usage-menu-bar?style=flat-square&color=blue" alt="Latest Release">
+  <br><br>
+  Claude Usage · macOS Menu Bar App
+</h1>
 
-A lightweight, native macOS status bar utility that tracks your rolling Claude.ai session limits and weekly usage in real-time. Built entirely with Swift using AppKit and SwiftUI, this app requires zero Xcode project bloat and compiles in seconds.
+<p align="center">
+  A lightweight, native macOS status bar app that tracks your rolling <strong>Claude.ai session limits</strong> and <strong>weekly usage</strong> in real-time — with an optional desktop widget.<br>
+  Built entirely in Swift (AppKit + SwiftUI + WidgetKit). Zero Xcode project files. Compiles in seconds.
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#getting-started">Getting Started</a> •
+  <a href="#desktop-widget">Desktop Widget</a> •
+  <a href="#security">Security</a> •
+  <a href="#troubleshooting">Troubleshooting</a> •
+  <a href="#changelog">Changelog</a>
+</p>
 
 ---
 
 ## Features
 
-* **Modular Menu Bar Displays:**
-  * **Stacked:** Displays both session usage (S) and weekly usage (W) vertically on two lines (similar to Macs Fan Control).
-  * **Compact:** A single-line summary displaying both limits (`S:22% W:15%`).
-  * **Session Only:** Displays only the session percentage (`22%`).
-  * **Icon Only:** A minimal "C" icon that changes color based on utilization.
-* **Dynamic Progress Dropdown:** Click the menu bar icon to see:
-  * An instant summary text line.
-  * Individual visual progress bars and reset countdowns for each rolling limit (5-Hour Window, 7-Day Window, etc.).
-  * Direct action buttons to refresh, access Settings, or Quit.
-* **Dual Authentication Methods:**
-  * **Claude Web Session:** Connects using your web browser `sessionKey` cookie.
-  * **Claude Code CLI:** Automatically scans the system keychain/credentials to track OAuth CLI sessions established by `claude login`.
-* **Keychain Secure Storage:** Stores your keys securely in the macOS Keychain using generic password encryption. No keys are ever stored in plaintext or logged.
-* **Native System Notifications:** Sends native macOS notifications when your usage exceeds a configurable alert threshold (e.g., warning at 80% limit capacity).
-* **Super Lightweight:** No Xcode setup required. It uses standard Swift compilation and compiles in under 2 seconds.
+### 🖥️ Menu Bar Status Display (4 Modes)
+| Mode | Description |
+|------|-------------|
+| **Stacked** | Two-line display: session % on top, weekly % on bottom (like Macs Fan Control) |
+| **Compact** | Single line: `S:22% W:15%` |
+| **Session Only** | Minimal: just `22%` |
+| **Icon Only** | A `C` icon that turns 🟢 Green → 🟠 Orange → 🔴 Red based on utilization |
+
+### 📊 Live Progress Dropdown
+Click the menu bar icon to see:
+- An instant summary line: `Usage: Session 22% • Weekly 15%`
+- Visual progress bars with countdown timers for each rolling window (5-Hour / 7-Day)
+- **Refresh Now**, **Settings**, and **Quit** actions
+
+### 🔐 Dual Authentication Methods
+- **Claude Web Session** — Connect using your browser `sessionKey` cookie
+- **Claude Code CLI** — Automatically scans your system Keychain for OAuth credentials from `claude login`
+
+### 🧩 Native Desktop Widget (v1.1.0+)
+A polished 2×2 WidgetKit widget designed in the Apple battery widget style:
+- **Session Limit** ring + time remaining (left)
+- **Weekly Limit** ring + time remaining (right)
+- Zero-latency sync with the menu bar app via App Group shared containers
+
+### 🔔 System Notifications
+Native macOS alerts when any limit exceeds a configurable threshold (default: 80%).
+
+### ⚙️ Smart Preferences
+- Configurable refresh interval (default: 5 min)
+- "Launch at Login" toggle via `ServiceManagement`
+- Resizable sidebar settings panel with keyboard shortcut support (`Cmd+V`, `Cmd+C`, etc.)
 
 ---
 
 ## Getting Started
 
-### 1. Build and Run
-
-To compile and package the app bundle, simply run the build script in your terminal:
+### 1. Build & Run
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/claude-usage-macos.git
-cd "claude-usage-macos"
+git clone https://github.com/Mudit01100001/claude-usage-menu-bar.git
+cd "claude-usage-menu-bar"
 
-# Make the build script executable and compile
+# Build (compiles in ~2 seconds, no Xcode required)
 chmod +x build.sh
 ./build.sh
 
-# Launch the application
+# Launch
 open ClaudeUsage.app
 ```
 
-The app runs as a status-item accessory (`LSUIElement`), meaning it resides exclusively in the menu bar and does not clutter your Dock.
+The app runs as a status-item accessory (`LSUIElement = true`) — it lives in the menu bar only, with no Dock icon.
 
-### 2. Configuration & Authentication
+### 2. Authentication Setup
 
-1. Click the status bar icon and choose **Settings...**.
-2. Resize the sidebar as desired to navigate the panels.
-3. Configure your connection method:
+#### Method A — Claude Web Session *(Recommended)*
+1. Log in to [claude.ai](https://claude.ai) in your browser
+2. Open DevTools (`F12` or `Cmd+Option+I`) → **Application** tab → **Cookies**
+3. Copy the value of the `sessionKey` cookie (starts with `sk-ant-sid01-`)
+4. In Settings → **Connection** → **Web Session**, paste it and click **Verify & Save**
 
-#### Method A: Claude Web Session (Recommended)
-1. Log in to [claude.ai](https://claude.ai) in your browser.
-2. Open Developer Tools (`F12` or `Cmd` + `Option` + `I`).
-3. Navigate to the **Application** tab (Chrome/Brave/Arc) or **Storage** tab (Safari/Firefox) and select **Cookies**.
-4. Copy the value of the `sessionKey` cookie (starts with `sk-ant-sid01-`).
-5. Paste it in the Connection panel under the Web tab and click **Verify & Save**.
+#### Method B — Claude Code CLI
+1. Run `claude login` in your terminal once
+2. In Settings → **Connection** → **Claude Code CLI**, click **Scan Keychain for Claude Code**
+3. When macOS prompts for your login password, click **Always Allow** (you won't be asked again)
 
-#### Method B: Claude Code CLI
-1. Ensure you have run `claude login` in your terminal.
-2. Under the Connection panel, switch to **Claude Code CLI** and click **Scan Keychain for Claude Code**.
-3. macOS will prompt you with a system dialog asking for your computer login password to authorize this app to access the keychain entry. Click **Always Allow**.
+---
+
+## Desktop Widget
+
+The 2×2 WidgetKit widget requires:
+- macOS 14 (Sonoma) or later
+- The main app to be launched at least once (registers the plugin with macOS)
+
+**Adding the widget:**
+1. Right-click your macOS desktop and choose **Edit Widgets…**
+2. Search for **"Claude Usage"** in the gallery
+3. Drag the **2×2 progress ring** widget to your desktop or Notification Center
+
+Data syncs automatically whenever the menu bar app refreshes.
 
 ---
 
 ## Security Architecture
 
-* **At-Rest Security:** Credentials are encrypted in the macOS Keychain using hardware-backed AES keys (Secure Enclave on Apple Silicon). They are set with `kSecAttrAccessibleAfterFirstUnlock` for protection.
-* **In-Transit Security:** Enforces strict HTTPS/TLS connections directly to official Anthropic endpoints (`https://claude.ai` and `https://api.anthropic.com`).
-* **Subprocess Security:** Keychain querying executes `/usr/bin/security` directly as an executable with isolated argument vectors, eliminating shell command injection risks.
-* **Telemetry & Privacy:** Zero third-party servers, analytics, tracking code, or external logs. Your credentials and usage statistics remain entirely local to your device.
+| Layer | Detail |
+|-------|--------|
+| **At Rest** | Credentials encrypted in macOS Keychain with `kSecAttrAccessibleAfterFirstUnlock` |
+| **In Transit** | Strict HTTPS/TLS to official Anthropic endpoints only |
+| **Subprocess** | `/usr/bin/security` called directly with isolated args — no shell injection risk |
+| **Telemetry** | Zero. No third-party servers, analytics, or external logging. Everything stays local. |
 
 ---
 
-## Important Notes & Troubleshooting
+## Troubleshooting
 
-* **Will the app ask for my Keychain password every time?**
-  * **No.** When macOS prompts you to authorize keychain access for the Claude Code credentials scan, make sure to click **"Always Allow"** (not just "Allow"). This adds the compiled app binary to the keychain item's Access Control list, so macOS will never prompt you again.
-* **Does the Claude Code CLI need to be running?**
-  * **No.** The app only reads the OAuth token generated when you ran `claude login` in the terminal. The CLI does not need to be active, and your terminal can be completely closed.
-* **Why did the refresh fail or not update?**
-  * If the app fails to retrieve data, check the Connections tab in Settings. Ensure the session is verified and not expired. For the Web Session Key, cookies typically expire after several weeks, requiring a fresh key from the browser. For the CLI, if the token is revoked, running `claude logout` followed by `claude login` in the terminal will refresh the system Keychain credentials.
+**Will it ask for my Keychain password every time?**  
+No — click **"Always Allow"** on the first macOS prompt to permanently whitelist the app binary.
+
+**Does Claude Code CLI need to be running?**  
+No — the app reads the stored OAuth token. Your terminal can be fully closed.
+
+**The widget doesn't appear in the Widget Gallery.**  
+Make sure you launched the app at least once after building, then try:
+```bash
+pluginkit -v -a "ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex"
+pkill -f chronod
+```
+
+**Refresh fails / data not updating.**  
+Open Settings → Connection. For web sessions, the `sessionKey` cookie expires after a few weeks — grab a fresh one from your browser. For CLI, run `claude logout && claude login`.
+
+**Duplicate app icons in Launchpad.**  
+If you've built the app from multiple directories, run:
+```bash
+defaults write com.apple.dock ResetLaunchPad -bool true; killall Dock
+```
+
+---
+
+## Releasing a New Version
+
+This repo ships with a Python release automation script:
+
+```bash
+python3 release.py
+```
+
+The script will:
+1. Detect your latest git tag and suggest the next semantic version
+2. Categorize commits since last release into features / fixes / polish
+3. Generate a professional release notes body
+4. Update `CHANGELOG.md` automatically
+5. Commit, tag, push to GitHub, and open the release page (or publish via API if `GITHUB_TOKEN` is set)
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history. Latest releases are documented on the [Releases page](https://github.com/Mudit01100001/claude-usage-menu-bar/releases).
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  Built with ❤️ and Claude · <a href="https://github.com/Mudit01100001/claude-usage-menu-bar/releases">View Releases</a> · <a href="https://github.com/Mudit01100001/claude-usage-menu-bar/issues">Report Issue</a>
+</p>

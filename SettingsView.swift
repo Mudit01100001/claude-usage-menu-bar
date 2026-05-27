@@ -688,6 +688,23 @@ struct SettingsTabView: View {
             }
             .onChange(of: state.enableNotifications) { _ in state.saveSettings() }
             .onChange(of: state.thresholdNotification) { _ in state.saveSettings() }
+            
+            Divider()
+            
+            // Launch at Login Toggle
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Launch at Login", isOn: Binding(
+                    get: { state.launchAtLogin },
+                    set: { enabled in
+                        state.toggleLaunchAtLogin(enabled: enabled)
+                    }
+                ))
+                .font(.system(size: 12, weight: .bold))
+                
+                Text("Automatically start Claude Usage when you log into your Mac.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
         }
     }
 }

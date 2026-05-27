@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Security
+import ServiceManagement
 
 class AppState: ObservableObject {
     
@@ -81,6 +82,7 @@ class AppState: ObservableObject {
     // Menu Bar Display Settings
     @Published var displayMode: String = "stacked" // "stacked", "compact", "session", "icon_only"
     @Published var showMenuBarIcon: Bool = true
+    @Published var launchAtLogin: Bool = false
     
     // Keychain service key for storing our custom Web sessionKey securely
     private let sessionKeyKeychainKey = "com.mudit.ClaudeUsage.sessionKey"
@@ -107,6 +109,12 @@ class AppState: ObservableObject {
         
         if let time = UserDefaults.standard.object(forKey: "lastFetchTime") as? Date {
             self.lastFetchTime = time
+        }
+        
+        if #available(macOS 13.0, *) {
+            self.launchAtLogin = SMAppService.mainApp.status == .enabled
+        } else {
+            self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         }
         
         // Securely retrieve the web sessionKey from Keychain
@@ -429,6 +437,32 @@ class AppState: ObservableObject {
             }
         } catch {
             updateStateWithError("Failed to parse usage data: \(error.localizedDescription)")
+        }
+    }
+    
+    func toggleLaunchAtLogin(enabled: Bool) {
+        if #available(macOS 13.0, *) {
+            do {
+                if enabled {
+                    if SMAppService.mainApp.status != .enabled {
+                        try SMAppService.mainApp.register()
+                    }
+                } else {
+                    if SMAppService.mainApp.status == .enabled {
+                        try SMAppService.mainApp.unregister()
+                    }
+                }
+                DispatchQueue.main.async {
+                    self.launchAtLogin = enabled
+                }
+            } catch {
+                print("Error toggling launch at login: \(error)")
+            }
+        } else {
+            UserDefaults.standard.set(enabled, forKey: "launchAtLogin")
+            DispatchQueue.main.async {
+                self.launchAtLogin = enabled
+            }
         }
     }
 }

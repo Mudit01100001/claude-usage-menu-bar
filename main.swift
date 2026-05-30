@@ -110,8 +110,8 @@ class SettingsWindowController: NSWindowController {
         let hosting = NSHostingController(rootView: view)
         
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 420),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -400,91 +400,93 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                 menu.addItem(header)
             }
             
-            // 1. Claude Buckets
-            let claudeBuckets = appState.usageBuckets.filter { 
-                !$0.name.hasPrefix("chatgpt") && !$0.name.hasPrefix("gemini") &&
-                !$0.name.hasPrefix("perplexity") && !$0.name.hasPrefix("antigravity")
-            }
-            if !claudeBuckets.isEmpty {
-                addProviderHeader(title: "Claude (Anthropic)", color: .systemOrange)
-                for bucket in claudeBuckets {
-                    let progressView = ProgressMenuItemView(
-                        bucketName: bucket.displayName,
-                        rawName: bucket.name,
-                        utilization: bucket.utilization,
-                        timeRemaining: bucket.timeRemainingString
-                    )
-                    let menuItem = NSMenuItem()
-                    menuItem.view = progressView
-                    menu.addItem(menuItem)
-                }
-            }
-            
-            // 2. ChatGPT Buckets
-            let chatgptBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("chatgpt") }
-            if !chatgptBuckets.isEmpty {
-                addProviderHeader(title: "ChatGPT (OpenAI)", color: NSColor(red: 16/255, green: 163/255, blue: 127/255, alpha: 1.0))
-                for bucket in chatgptBuckets {
-                    let progressView = ProgressMenuItemView(
-                        bucketName: bucket.displayName,
-                        rawName: bucket.name,
-                        utilization: bucket.utilization,
-                        timeRemaining: bucket.timeRemainingString
-                    )
-                    let menuItem = NSMenuItem()
-                    menuItem.view = progressView
-                    menu.addItem(menuItem)
-                }
-            }
-            
-            // 3. Gemini Buckets
-            let geminiBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("gemini") }
-            if !geminiBuckets.isEmpty {
-                addProviderHeader(title: "Gemini (Google)", color: NSColor(red: 26/255, green: 115/255, blue: 232/255, alpha: 1.0))
-                for bucket in geminiBuckets {
-                    let progressView = ProgressMenuItemView(
-                        bucketName: bucket.displayName,
-                        rawName: bucket.name,
-                        utilization: bucket.utilization,
-                        timeRemaining: bucket.timeRemainingString
-                    )
-                    let menuItem = NSMenuItem()
-                    menuItem.view = progressView
-                    menu.addItem(menuItem)
-                }
-            }
-            
-            // 4. Perplexity Buckets
-            let perplexityBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("perplexity") }
-            if !perplexityBuckets.isEmpty {
-                addProviderHeader(title: "Perplexity", color: NSColor(red: 25/255, green: 161/255, blue: 183/255, alpha: 1.0))
-                for bucket in perplexityBuckets {
-                    let progressView = ProgressMenuItemView(
-                        bucketName: bucket.displayName,
-                        rawName: bucket.name,
-                        utilization: bucket.utilization,
-                        timeRemaining: bucket.timeRemainingString
-                    )
-                    let menuItem = NSMenuItem()
-                    menuItem.view = progressView
-                    menu.addItem(menuItem)
-                }
-            }
-            
-            // 5. Antigravity Buckets
-            let antigravityBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("antigravity") }
-            if !antigravityBuckets.isEmpty {
-                addProviderHeader(title: "Antigravity Agent", color: NSColor(red: 142/255, green: 68/255, blue: 173/255, alpha: 1.0))
-                for bucket in antigravityBuckets {
-                    let progressView = ProgressMenuItemView(
-                        bucketName: bucket.displayName,
-                        rawName: bucket.name,
-                        utilization: bucket.utilization,
-                        timeRemaining: bucket.timeRemainingString
-                    )
-                    let menuItem = NSMenuItem()
-                    menuItem.view = progressView
-                    menu.addItem(menuItem)
+            for provider in appState.providerOrder {
+                switch provider {
+                case "claude":
+                    let claudeBuckets = appState.usageBuckets.filter { 
+                        !$0.name.hasPrefix("chatgpt") && !$0.name.hasPrefix("gemini") &&
+                        !$0.name.hasPrefix("perplexity") && !$0.name.hasPrefix("antigravity")
+                    }
+                    if !claudeBuckets.isEmpty {
+                        addProviderHeader(title: "Claude (Anthropic)", color: .systemOrange)
+                        for bucket in claudeBuckets {
+                            let progressView = ProgressMenuItemView(
+                                bucketName: bucket.displayName,
+                                rawName: bucket.name,
+                                utilization: bucket.utilization,
+                                timeRemaining: bucket.timeRemainingString
+                            )
+                            let menuItem = NSMenuItem()
+                            menuItem.view = progressView
+                            menu.addItem(menuItem)
+                        }
+                    }
+                case "chatgpt":
+                    let chatgptBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("chatgpt") }
+                    if !chatgptBuckets.isEmpty {
+                        addProviderHeader(title: "ChatGPT (OpenAI)", color: NSColor(red: 16/255, green: 163/255, blue: 127/255, alpha: 1.0))
+                        for bucket in chatgptBuckets {
+                            let progressView = ProgressMenuItemView(
+                                bucketName: bucket.displayName,
+                                rawName: bucket.name,
+                                utilization: bucket.utilization,
+                                timeRemaining: bucket.timeRemainingString
+                            )
+                            let menuItem = NSMenuItem()
+                            menuItem.view = progressView
+                            menu.addItem(menuItem)
+                        }
+                    }
+                case "gemini":
+                    let geminiBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("gemini") }
+                    if !geminiBuckets.isEmpty {
+                        addProviderHeader(title: "Gemini (Google)", color: NSColor(red: 26/255, green: 115/255, blue: 232/255, alpha: 1.0))
+                        for bucket in geminiBuckets {
+                            let progressView = ProgressMenuItemView(
+                                bucketName: bucket.displayName,
+                                rawName: bucket.name,
+                                utilization: bucket.utilization,
+                                timeRemaining: bucket.timeRemainingString
+                            )
+                            let menuItem = NSMenuItem()
+                            menuItem.view = progressView
+                            menu.addItem(menuItem)
+                        }
+                    }
+                case "perplexity":
+                    let perplexityBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("perplexity") }
+                    if !perplexityBuckets.isEmpty {
+                        addProviderHeader(title: "Perplexity", color: NSColor(red: 25/255, green: 161/255, blue: 183/255, alpha: 1.0))
+                        for bucket in perplexityBuckets {
+                            let progressView = ProgressMenuItemView(
+                                bucketName: bucket.displayName,
+                                rawName: bucket.name,
+                                utilization: bucket.utilization,
+                                timeRemaining: bucket.timeRemainingString
+                            )
+                            let menuItem = NSMenuItem()
+                            menuItem.view = progressView
+                            menu.addItem(menuItem)
+                        }
+                    }
+                case "antigravity":
+                    let antigravityBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("antigravity") }
+                    if !antigravityBuckets.isEmpty {
+                        addProviderHeader(title: "Antigravity Agent", color: NSColor(red: 142/255, green: 68/255, blue: 173/255, alpha: 1.0))
+                        for bucket in antigravityBuckets {
+                            let progressView = ProgressMenuItemView(
+                                bucketName: bucket.displayName,
+                                rawName: bucket.name,
+                                utilization: bucket.utilization,
+                                timeRemaining: bucket.timeRemainingString
+                            )
+                            let menuItem = NSMenuItem()
+                            menuItem.view = progressView
+                            menu.addItem(menuItem)
+                        }
+                    }
+                default:
+                    break
                 }
             }
         }

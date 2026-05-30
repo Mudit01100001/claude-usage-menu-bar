@@ -20,7 +20,7 @@ struct SettingsView: View {
                         .font(.system(size: 14, weight: .bold))
                         .lineLimit(1)
                 }
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 12)
                 .padding(.top, 14)
                 .padding(.bottom, 16)
                 
@@ -33,8 +33,8 @@ struct SettingsView: View {
                     selectedTab = "connection"
                 }
                 
-                SidebarButton(title: "Display", icon: "rectangle.3.group", isSelected: selectedTab == "display") {
-                    selectedTab = "display"
+                SidebarButton(title: "Menu Bar", icon: "menubar.rectangle", isSelected: selectedTab == "menuBar") {
+                    selectedTab = "menuBar"
                 }
                 
                 SidebarButton(title: "Settings", icon: "gearshape.fill", isSelected: selectedTab == "settings") {
@@ -58,10 +58,10 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 12)
                 .padding(.bottom, 12)
             }
-            .frame(minWidth: 110, idealWidth: 135, maxWidth: 200)
+            .frame(minWidth: 140, idealWidth: 160, maxWidth: 220)
             .frame(maxHeight: .infinity)
             .background(Color(NSColor.windowBackgroundColor).opacity(0.4))
             
@@ -78,8 +78,8 @@ struct SettingsView: View {
                             verifySuccess: $verifySuccess,
                             verifyError: $verifyError
                         )
-                    case "display":
-                        DisplayTabView(state: state)
+                    case "menuBar":
+                        MenuBarTabView(state: state)
                     case "settings":
                         SettingsTabView(state: state)
                     default:
@@ -88,10 +88,10 @@ struct SettingsView: View {
                 }
                 .padding(24)
             }
-            .frame(minWidth: 350, idealWidth: 425, maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 380, idealWidth: 460, maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(NSColor.underPageBackgroundColor))
         }
-        .frame(width: 560, height: 420)
+        .frame(minWidth: 620, maxWidth: .infinity, minHeight: 450, maxHeight: .infinity)
     }
 }
 
@@ -103,14 +103,16 @@ struct SidebarButton: View {
     let isSelected: Bool
     let action: () -> Void
     
+    @State private var isHovered = false
+    
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 11))
-                    .frame(width: 14)
+                    .font(.system(size: 12))
+                    .frame(width: 16, alignment: .center)
                 Text(title)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer()
@@ -119,13 +121,16 @@ struct SidebarButton: View {
             .padding(.horizontal, 10)
             .contentShape(Rectangle())
             .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(isSelected ? Color.orange.opacity(0.15) : Color.clear)
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected ? Color.orange.opacity(0.18) : (isHovered ? Color.primary.opacity(0.06) : Color.clear))
             )
             .foregroundColor(isSelected ? .orange : .primary)
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 8)
+        .onHover { hovering in
+            isHovered = hovering
+        }
     }
 }
 
@@ -430,15 +435,23 @@ struct ConnectionTabView: View {
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(.orange)
             
-            Picker("Method", selection: $state.selectedMethod) {
-                Text("Claude Web Session").tag("web")
-                Text("Claude Code CLI").tag("cli")
-            }
-            .pickerStyle(.segmented)
-            .onChange(of: state.selectedMethod) { _ in
-                verifySuccess = nil
-                verifyError = nil
-                state.saveSettings()
+            HStack(spacing: 8) {
+                Picker("Method", selection: $state.selectedMethod) {
+                    Text("Claude Web Session").tag("web")
+                    Text("Claude Code CLI").tag("cli")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: state.selectedMethod) { _ in
+                    verifySuccess = nil
+                    verifyError = nil
+                    state.saveSettings()
+                }
+                
+                HelpButton(
+                    title: "Claude Connection Methods",
+                    content: "• **Web Session**: Uses your browser's sessionKey cookie to poll Anthropic's private web app endpoint. Free but requires periodic session refresh.\n• **Code CLI**: Reads the OAuth session established by Anthropic's 'claude login' CLI tool."
+                )
             }
             
             if state.selectedMethod == "web" {
@@ -509,99 +522,92 @@ struct ConnectionTabView: View {
     
     @ViewBuilder private var chatgptSetupView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("ChatGPT API Tracking (OpenAI)")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(Color(red: 16/255, green: 163/255, blue: 127/255))
-                Spacer()
-                Toggle("", isOn: $state.chatgptEnabled)
-                    .toggleStyle(.switch)
-                    .onChange(of: state.chatgptEnabled) { _ in
-                        state.saveSettings()
-                        state.refreshUsage()
-                    }
-            }
+            Text("ChatGPT API Tracking (OpenAI)")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(Color(red: 16/255, green: 163/255, blue: 127/255))
             
-            if state.chatgptEnabled {
+            HStack(spacing: 8) {
                 Picker("Method", selection: $state.chatgptMethod) {
                     Text("OpenAI API Key").tag("api_key")
                     Text("Simulation Mode").tag("simulated")
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .onChange(of: state.chatgptMethod) { _ in
                     state.saveSettings()
                     state.refreshUsage()
                 }
                 
-                if state.chatgptMethod == "api_key" {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Paste your OpenAI API Key (`sk-...`):")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        
-                        HStack(spacing: 8) {
-                            if showChatGPTKey {
-                                TextField("sk-...", text: $state.chatgptApiKey)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: 11, design: .monospaced))
-                            } else {
-                                SecureField("sk-...", text: $state.chatgptApiKey)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: 11, design: .monospaced))
-                            }
-                            Button(action: { showChatGPTKey.toggle() }) {
-                                Image(systemName: showChatGPTKey ? "eye.slash" : "eye")
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
+                HelpButton(
+                    title: "ChatGPT Mode Comparison",
+                    content: "• **API Key Mode**: Connects directly to OpenAI's developer endpoints (using your key) to count and summarize your daily token costs.\n• **Simulation Mode**: Adjust sliders to manually simulate monthly and current costs without making external network calls."
+                )
+            }
+            
+            if state.chatgptMethod == "api_key" {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Paste your OpenAI API Key (`sk-...`):")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    
+                    HStack(spacing: 8) {
+                        if showChatGPTKey {
+                            TextField("sk-...", text: $state.chatgptApiKey)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11, design: .monospaced))
+                        } else {
+                            SecureField("sk-...", text: $state.chatgptApiKey)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11, design: .monospaced))
                         }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Daily Cost Budget Limit")
-                                    .font(.system(size: 11))
-                                Spacer()
-                                Text(String(format: "$%.2f", state.chatgptMonthlyLimit))
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            Slider(value: $state.chatgptMonthlyLimit, in: 1...100, step: 1)
+                        Button(action: { showChatGPTKey.toggle() }) {
+                            Image(systemName: showChatGPTKey ? "eye.slash" : "eye")
+                                .foregroundColor(.secondary)
                         }
+                        .buttonStyle(.plain)
                     }
-                } else {
-                    VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Simulated Monthly Limit")
-                                    .font(.system(size: 11))
-                                Spacer()
-                                Text(String(format: "$%.2f", state.chatgptMonthlyLimit))
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            Slider(value: $state.chatgptMonthlyLimit, in: 5...100, step: 5)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Daily Cost Budget Limit")
+                                .font(.system(size: 11))
+                            Spacer()
+                            Text(String(format: "$%.2f", state.chatgptMonthlyLimit))
+                                .font(.system(size: 11, weight: .bold))
                         }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Simulated Current Usage")
-                                    .font(.system(size: 11))
-                                Spacer()
-                                Text(String(format: "$%.2f", state.chatgptCurrentUsage))
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            Slider(value: $state.chatgptCurrentUsage, in: 0...state.chatgptMonthlyLimit, step: 0.25)
-                        }
+                        Slider(value: $state.chatgptMonthlyLimit, in: 1...100, step: 1)
                     }
-                }
-                
-                Button("Save & Apply") {
-                    state.saveSettings()
-                    state.refreshUsage()
-                    verifySuccess = true
                 }
             } else {
-                Text("Enable ChatGPT tracking to view usage metrics.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Simulated Monthly Limit")
+                                .font(.system(size: 11))
+                            Spacer()
+                            Text(String(format: "$%.2f", state.chatgptMonthlyLimit))
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        Slider(value: $state.chatgptMonthlyLimit, in: 5...100, step: 5)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Simulated Current Usage")
+                                .font(.system(size: 11))
+                            Spacer()
+                            Text(String(format: "$%.2f", state.chatgptCurrentUsage))
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        Slider(value: $state.chatgptCurrentUsage, in: 0...state.chatgptMonthlyLimit, step: 0.25)
+                    }
+                }
+            }
+            
+            Button("Save & Apply") {
+                state.saveSettings()
+                state.refreshUsage()
+                verifySuccess = true
             }
             
             statusIndicatorView
@@ -610,99 +616,92 @@ struct ConnectionTabView: View {
     
     @ViewBuilder private var geminiSetupView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Gemini API Quota Tracking (Google)")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(Color(red: 26/255, green: 115/255, blue: 232/255))
-                Spacer()
-                Toggle("", isOn: $state.geminiEnabled)
-                    .toggleStyle(.switch)
-                    .onChange(of: state.geminiEnabled) { _ in
-                        state.saveSettings()
-                        state.refreshUsage()
-                    }
-            }
+            Text("Gemini API Quota Tracking (Google)")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(Color(red: 26/255, green: 115/255, blue: 232/255))
             
-            if state.geminiEnabled {
+            HStack(spacing: 8) {
                 Picker("Method", selection: $state.geminiMethod) {
                     Text("API Quota Tracker").tag("api_key")
                     Text("Simulation Mode").tag("simulated")
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .onChange(of: state.geminiMethod) { _ in
                     state.saveSettings()
                     state.refreshUsage()
                 }
                 
-                if state.geminiMethod == "api_key" {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Enter your Gemini API Key (Quota local tracker):")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        
-                        HStack(spacing: 8) {
-                            if showGeminiKey {
-                                TextField("AIzaSy...", text: $state.geminiApiKey)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: 11, design: .monospaced))
-                            } else {
-                                SecureField("AIzaSy...", text: $state.geminiApiKey)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: 11, design: .monospaced))
-                            }
-                            Button(action: { showGeminiKey.toggle() }) {
-                                Image(systemName: showGeminiKey ? "eye.slash" : "eye")
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
+                HelpButton(
+                    title: "Gemini Mode Comparison",
+                    content: "• **API Quota Tracker**: Automatically tracks Google AI Studio API requests locally (since official endpoints do not report balance keys directly).\n• **Simulation Mode**: Adjust sliders to simulate Google Gemini query counts and daily limits."
+                )
+            }
+            
+            if state.geminiMethod == "api_key" {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Enter your Gemini API Key (Quota local tracker):")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    
+                    HStack(spacing: 8) {
+                        if showGeminiKey {
+                            TextField("AIzaSy...", text: $state.geminiApiKey)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11, design: .monospaced))
+                        } else {
+                            SecureField("AIzaSy...", text: $state.geminiApiKey)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11, design: .monospaced))
                         }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Daily Limit Quota")
-                                    .font(.system(size: 11))
-                                Spacer()
-                                Text("\(Int(state.geminiDailyLimit)) requests")
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            Slider(value: $state.geminiDailyLimit, in: 100...5000, step: 100)
+                        Button(action: { showGeminiKey.toggle() }) {
+                            Image(systemName: showGeminiKey ? "eye.slash" : "eye")
+                                .foregroundColor(.secondary)
                         }
+                        .buttonStyle(.plain)
                     }
-                } else {
-                    VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Simulated Limit Requests")
-                                    .font(.system(size: 11))
-                                Spacer()
-                                Text("\(Int(state.geminiDailyLimit)) requests")
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            Slider(value: $state.geminiDailyLimit, in: 500...5000, step: 100)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Daily Limit Quota")
+                                .font(.system(size: 11))
+                            Spacer()
+                            Text("\(Int(state.geminiDailyLimit)) requests")
+                                .font(.system(size: 11, weight: .bold))
                         }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Simulated Requests Count")
-                                    .font(.system(size: 11))
-                                Spacer()
-                                Text("\(Int(state.geminiCurrentUsage)) requests")
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            Slider(value: $state.geminiCurrentUsage, in: 0...state.geminiDailyLimit, step: 50)
-                        }
+                        Slider(value: $state.geminiDailyLimit, in: 100...5000, step: 100)
                     }
-                }
-                
-                Button("Save & Apply") {
-                    state.saveSettings()
-                    state.refreshUsage()
-                    verifySuccess = true
                 }
             } else {
-                Text("Enable Gemini tracking to view usage metrics.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Simulated Limit Requests")
+                                .font(.system(size: 11))
+                            Spacer()
+                            Text("\(Int(state.geminiDailyLimit)) requests")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        Slider(value: $state.geminiDailyLimit, in: 500...5000, step: 100)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Simulated Requests Count")
+                                .font(.system(size: 11))
+                            Spacer()
+                            Text("\(Int(state.geminiCurrentUsage)) requests")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        Slider(value: $state.geminiCurrentUsage, in: 0...state.geminiDailyLimit, step: 50)
+                    }
+                }
+            }
+            
+            Button("Save & Apply") {
+                state.saveSettings()
+                state.refreshUsage()
+                verifySuccess = true
             }
             
             statusIndicatorView
@@ -711,86 +710,79 @@ struct ConnectionTabView: View {
     
     @ViewBuilder private var perplexitySetupView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Perplexity Pro/API Tracking")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(Color(red: 25/255, green: 161/255, blue: 183/255))
-                Spacer()
-                Toggle("", isOn: $state.perplexityEnabled)
-                    .toggleStyle(.switch)
-                    .onChange(of: state.perplexityEnabled) { _ in
-                        state.saveSettings()
-                        state.refreshUsage()
-                    }
-            }
+            Text("Perplexity Pro/API Tracking")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(Color(red: 25/255, green: 161/255, blue: 183/255))
             
-            if state.perplexityEnabled {
+            HStack(spacing: 8) {
                 Picker("Method", selection: $state.perplexityMethod) {
                     Text("Prepaid Balance").tag("api_key")
                     Text("Simulation Mode").tag("simulated")
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .onChange(of: state.perplexityMethod) { _ in
                     state.saveSettings()
                     state.refreshUsage()
                 }
                 
-                VStack(alignment: .leading, spacing: 10) {
-                    if state.perplexityMethod == "api_key" {
-                        Text("Enter your Perplexity API Key:")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        
-                        HStack(spacing: 8) {
-                            if showPerplexityKey {
-                                TextField("pplx-...", text: $state.perplexityApiKey)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: 11, design: .monospaced))
-                            } else {
-                                SecureField("pplx-...", text: $state.perplexityApiKey)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: 11, design: .monospaced))
-                            }
-                            Button(action: { showPerplexityKey.toggle() }) {
-                                Image(systemName: showPerplexityKey ? "eye.slash" : "eye")
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
+                HelpButton(
+                    title: "Perplexity Mode Comparison",
+                    content: "• **Prepaid Balance Mode**: Polls the Perplexity API usage servers directly (using your credentials) to check remaining credit balances.\n• **Simulation Mode**: Run offline and manually adjust slides to represent credit limits."
+                )
+            }
+            
+            VStack(alignment: .leading, spacing: 10) {
+                if state.perplexityMethod == "api_key" {
+                    Text("Enter your Perplexity API Key:")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
                     
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Prepaid Credit Balance Limit")
-                                .font(.system(size: 11))
-                            Spacer()
-                            Text(String(format: "$%.2f", state.perplexityLimit))
-                                .font(.system(size: 11, weight: .bold))
+                    HStack(spacing: 8) {
+                        if showPerplexityKey {
+                            TextField("pplx-...", text: $state.perplexityApiKey)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11, design: .monospaced))
+                        } else {
+                            SecureField("pplx-...", text: $state.perplexityApiKey)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11, design: .monospaced))
                         }
-                        Slider(value: $state.perplexityLimit, in: 5...50, step: 5)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Simulated Credits Used")
-                                .font(.system(size: 11))
-                            Spacer()
-                            Text(String(format: "$%.2f", state.perplexityCurrentUsage))
-                                .font(.system(size: 11, weight: .bold))
+                        Button(action: { showPerplexityKey.toggle() }) {
+                            Image(systemName: showPerplexityKey ? "eye.slash" : "eye")
+                                .foregroundColor(.secondary)
                         }
-                        Slider(value: $state.perplexityCurrentUsage, in: 0...state.perplexityLimit, step: 0.5)
+                        .buttonStyle(.plain)
                     }
                 }
                 
-                Button("Save & Apply") {
-                    state.saveSettings()
-                    state.refreshUsage()
-                    verifySuccess = true
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Prepaid Credit Balance Limit")
+                            .font(.system(size: 11))
+                        Spacer()
+                        Text(String(format: "$%.2f", state.perplexityLimit))
+                            .font(.system(size: 11, weight: .bold))
+                    }
+                    Slider(value: $state.perplexityLimit, in: 5...50, step: 5)
                 }
-            } else {
-                Text("Enable Perplexity tracking to view usage metrics.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Simulated Credits Used")
+                            .font(.system(size: 11))
+                        Spacer()
+                        Text(String(format: "$%.2f", state.perplexityCurrentUsage))
+                            .font(.system(size: 11, weight: .bold))
+                    }
+                    Slider(value: $state.perplexityCurrentUsage, in: 0...state.perplexityLimit, step: 0.5)
+                }
+            }
+            
+            Button("Save & Apply") {
+                state.saveSettings()
+                state.refreshUsage()
+                verifySuccess = true
             }
             
             statusIndicatorView
@@ -799,96 +791,89 @@ struct ConnectionTabView: View {
     
     @ViewBuilder private var antigravitySetupView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Antigravity Log Scanner")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(Color(red: 142/255, green: 68/255, blue: 173/255))
-                Spacer()
-                Toggle("", isOn: $state.antigravityEnabled)
-                    .toggleStyle(.switch)
-                    .onChange(of: state.antigravityEnabled) { _ in
-                        state.saveSettings()
-                        state.refreshUsage()
-                    }
-            }
+            Text("Antigravity Log Scanner")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(Color(red: 142/255, green: 68/255, blue: 173/255))
             
-            if state.antigravityEnabled {
+            HStack(spacing: 8) {
                 Picker("Method", selection: $state.antigravityMethod) {
                     Text("Live Log Scanner").tag("local_tracker")
                     Text("Simulation Mode").tag("simulated")
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .onChange(of: state.antigravityMethod) { _ in
                     state.saveSettings()
                     state.refreshUsage()
                 }
                 
-                if state.antigravityMethod == "local_tracker" {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Tracks active agent conversation logs located in:")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        
-                        Text("~/.gemini/antigravity/brain/")
-                            .font(.system(size: 10, design: .monospaced))
-                            .padding(6)
-                            .background(Color(NSColor.controlBackgroundColor))
-                            .cornerRadius(4)
-                        
-                        HStack {
-                            Text("Current Live Queries:")
-                                .font(.system(size: 11))
-                            Text("\(Int(state.antigravityCurrentUsage))")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(.purple)
-                        }
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Simulated Queries limit")
-                                    .font(.system(size: 11))
-                                Spacer()
-                                Text("\(Int(state.antigravityLimit)) queries")
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            Slider(value: $state.antigravityLimit, in: 20...500, step: 10)
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Simulated Queries count")
-                                    .font(.system(size: 11))
-                                Spacer()
-                                Text("\(Int(state.antigravityCurrentUsage)) queries")
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            Slider(value: $state.antigravityCurrentUsage, in: 0...state.antigravityLimit, step: 5)
-                        }
-                    }
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
+                HelpButton(
+                    title: "Antigravity Mode Comparison",
+                    content: "• **Live Log Scanner**: Automatically counts lines matching type 'USER_INPUT' in transcript files at ~/.gemini/antigravity/brain/ to track prompt usage.\n• **Simulation Mode**: Run offline and manually simulate prompt activity."
+                )
+            }
+            
+            if state.antigravityMethod == "local_tracker" {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Tracks active agent conversation logs located in:")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    
+                    Text("~/.gemini/antigravity/brain/")
+                        .font(.system(size: 10, design: .monospaced))
+                        .padding(6)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(4)
+                    
                     HStack {
-                        Text("Weekly Query Limit")
+                        Text("Current Live Queries:")
                             .font(.system(size: 11))
-                        Spacer()
-                        Text("\(Int(state.antigravityLimit)) queries")
-                            .font(.system(size: 11, weight: .bold))
+                        Text("\(Int(state.antigravityCurrentUsage))")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.purple)
                     }
-                    Slider(value: $state.antigravityLimit, in: 10...500, step: 10)
-                }
-                
-                Button("Save & Apply") {
-                    state.saveSettings()
-                    state.refreshUsage()
-                    verifySuccess = true
                 }
             } else {
-                Text("Enable Antigravity agent tracking to view usage metrics.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Simulated Queries limit")
+                                .font(.system(size: 11))
+                            Spacer()
+                            Text("\(Int(state.antigravityLimit)) queries")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        Slider(value: $state.antigravityLimit, in: 20...500, step: 10)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Simulated Queries count")
+                                .font(.system(size: 11))
+                            Spacer()
+                            Text("\(Int(state.antigravityCurrentUsage)) queries")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        Slider(value: $state.antigravityCurrentUsage, in: 0...state.antigravityLimit, step: 5)
+                    }
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Weekly Query Limit")
+                        .font(.system(size: 11))
+                    Spacer()
+                    Text("\(Int(state.antigravityLimit)) queries")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                Slider(value: $state.antigravityLimit, in: 10...500, step: 10)
+            }
+            
+            Button("Save & Apply") {
+                state.saveSettings()
+                state.refreshUsage()
+                verifySuccess = true
             }
             
             statusIndicatorView
@@ -969,18 +954,122 @@ struct ConnectionTabView: View {
 
 // MARK: - Display Tab (NEW)
 
-struct DisplayTabView: View {
+// MARK: - Menu Bar Tab
+
+struct MenuBarTabView: View {
     @ObservedObject var state: AppState
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Menu Bar Display")
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Menu Bar Settings")
                 .font(.system(size: 18, weight: .bold))
             
-            // Primary Provider Selector
+            // Section 1: Visibility & Enablement
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Enable Providers")
+                    .font(.system(size: 13, weight: .bold))
+                Text("Toggle which models are tracked. Enabled providers will show up on the Dashboard and Menu Bar dropdown.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Enable ChatGPT (OpenAI)", isOn: $state.chatgptEnabled)
+                    Toggle("Enable Gemini (Google)", isOn: $state.geminiEnabled)
+                    Toggle("Enable Perplexity", isOn: $state.perplexityEnabled)
+                    Toggle("Enable Antigravity Agent", isOn: $state.antigravityEnabled)
+                }
+                .toggleStyle(.checkbox)
+                .font(.system(size: 11))
+                .onChange(of: state.chatgptEnabled) { _ in state.saveSettings(); state.refreshUsage() }
+                .onChange(of: state.geminiEnabled) { _ in state.saveSettings(); state.refreshUsage() }
+                .onChange(of: state.perplexityEnabled) { _ in state.saveSettings(); state.refreshUsage() }
+                .onChange(of: state.antigravityEnabled) { _ in state.saveSettings(); state.refreshUsage() }
+            }
+            .padding(12)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
+            )
+            
+            // Section 2: Reordering
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Provider Display Order")
+                    .font(.system(size: 13, weight: .bold))
+                Text("Move providers to adjust their priority and ordering in the Dashboard and Menu Bar dropdown.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                
+                VStack(spacing: 6) {
+                    ForEach(0..<state.providerOrder.count, id: \.self) { index in
+                        let provider = state.providerOrder[index]
+                        let displayName = providerDisplayName(provider)
+                        let isEnabled = isProviderEnabled(provider)
+                        
+                        HStack {
+                            Image(systemName: providerIconName(provider))
+                                .foregroundColor(providerColor(provider))
+                                .font(.system(size: 12))
+                                .frame(width: 20)
+                            
+                            Text(displayName)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(isEnabled ? .primary : .secondary)
+                            
+                            if !isEnabled {
+                                Text("(Disabled)")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            HStack(spacing: 4) {
+                                Button(action: { state.moveProviderUp(provider) }) {
+                                    Image(systemName: "chevron.up")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.primary)
+                                }
+                                .buttonStyle(.plain)
+                                .frame(width: 20, height: 20)
+                                .background(Color(NSColor.controlBackgroundColor))
+                                .cornerRadius(4)
+                                .disabled(index == 0)
+                                
+                                Button(action: { state.moveProviderDown(provider) }) {
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.primary)
+                                }
+                                .buttonStyle(.plain)
+                                .frame(width: 20, height: 20)
+                                .background(Color(NSColor.controlBackgroundColor))
+                                .cornerRadius(4)
+                                .disabled(index == state.providerOrder.count - 1)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color(NSColor.windowBackgroundColor).opacity(0.5))
+                        )
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
+            )
+            
+            // Section 3: Primary Provider Selector
             VStack(alignment: .leading, spacing: 8) {
-                Text("Primary Provider (Menu Bar & Widget)")
-                    .font(.system(size: 12, weight: .bold))
+                Text("Primary Display Pinned Provider")
+                    .font(.system(size: 13, weight: .bold))
                 
                 Picker("Primary Provider", selection: $state.primaryProvider) {
                     Text("Claude").tag("claude")
@@ -991,25 +1080,31 @@ struct DisplayTabView: View {
                     Text("All (Hybrid / Cycle)").tag("all")
                 }
                 .pickerStyle(.menu)
+                .labelsHidden()
                 .onChange(of: state.primaryProvider) { _ in
                     state.saveSettings()
-                    state.refreshUsage() // Updates shared widget and menu bar immediately
+                    state.refreshUsage()
                     NotificationCenter.default.post(name: Notification.Name("UpdateMenuBarText"), object: nil)
                 }
                 
-                Text("Selects which provider's usage data is pinned to the menu bar text and desktop widget.")
+                Text("Determines which provider's metrics are shown directly in the menu bar text and widget widget.")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
+            .padding(12)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
+            )
             
-            Divider()
-            
-            // Display Mode
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Display Mode")
-                    .font(.system(size: 12, weight: .bold))
+            // Section 4: Display Mode & Preview
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Menu Bar Visual Appearance")
+                    .font(.system(size: 13, weight: .bold))
                 
-                Picker("Mode", selection: $state.displayMode) {
+                Picker("Display Mode", selection: $state.displayMode) {
                     HStack(spacing: 6) {
                         Text("Stacked")
                         Text("S:22% / W:15%")
@@ -1045,74 +1140,140 @@ struct DisplayTabView: View {
                     NotificationCenter.default.post(name: Notification.Name("UpdateMenuBarText"), object: nil)
                 }
                 
-                Text("Stacked mode shows session (S) and weekly (W) limits on two lines, like Macs Fan Control.")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
-            
-            Divider()
-            
-            // Icon Toggle
-            VStack(alignment: .leading, spacing: 6) {
-                Toggle("Show \"C\" icon in menu bar", isOn: $state.showMenuBarIcon)
-                    .font(.system(size: 12, weight: .bold))
-                
-                Text("Displays a small C letter next to the usage text for easy identification.")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
-            .onChange(of: state.showMenuBarIcon) { _ in
-                state.saveSettings()
-                NotificationCenter.default.post(name: Notification.Name("UpdateMenuBarText"), object: nil)
-            }
-            
-            Divider()
-            
-            // Preview
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Preview")
-                    .font(.system(size: 12, weight: .bold))
-                
-                HStack(spacing: 8) {
-                    if state.showMenuBarIcon {
-                        Text("C")
-                            .font(.system(size: 10, weight: .heavy))
-                            .foregroundColor(.secondary)
+                Toggle("Show character icon next to text", isOn: $state.showMenuBarIcon)
+                    .font(.system(size: 11))
+                    .onChange(of: state.showMenuBarIcon) { _ in
+                        state.saveSettings()
+                        NotificationCenter.default.post(name: Notification.Name("UpdateMenuBarText"), object: nil)
                     }
+                
+                Divider()
+                
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Menu Bar Preview")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
                     
-                    switch state.displayMode {
-                    case "stacked":
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("S:22%")
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            Text("W:15%")
-                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    HStack(spacing: 8) {
+                        if state.showMenuBarIcon {
+                            Text("C")
+                                .font(.system(size: 10, weight: .heavy))
                                 .foregroundColor(.secondary)
                         }
-                    case "compact":
-                        Text("S:22% W:15%")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    case "session":
-                        Text("22%")
-                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    case "icon_only":
-                        Text("(icon only)")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    default:
-                        Text("--")
+                        
+                        switch state.displayMode {
+                        case "stacked":
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text("S:22%")
+                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                Text("W:15%")
+                                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                        case "compact":
+                            Text("S:22% W:15%")
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        case "session":
+                            Text("22%")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        case "icon_only":
+                            Text("(Icon Only)")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        default:
+                            Text("--")
+                        }
                     }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
                 }
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(NSColor.controlBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                )
             }
+            .padding(12)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
+            )
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func providerDisplayName(_ provider: String) -> String {
+        switch provider {
+        case "claude": return "Claude (Anthropic)"
+        case "chatgpt": return "ChatGPT (OpenAI)"
+        case "gemini": return "Gemini (Google)"
+        case "perplexity": return "Perplexity"
+        case "antigravity": return "Antigravity Agent"
+        default: return provider.capitalized
+        }
+    }
+    
+    private func isProviderEnabled(_ provider: String) -> Bool {
+        switch provider {
+        case "claude": return true
+        case "chatgpt": return state.chatgptEnabled
+        case "gemini": return state.geminiEnabled
+        case "perplexity": return state.perplexityEnabled
+        case "antigravity": return state.antigravityEnabled
+        default: return false
+        }
+    }
+    
+    private func providerIconName(_ provider: String) -> String {
+        switch provider {
+        case "claude": return "sparkles"
+        case "chatgpt": return "message.fill"
+        case "gemini": return "circle.grid.cross.fill"
+        case "perplexity": return "magnifyingglass"
+        case "antigravity": return "cpu"
+        default: return "questionmark"
+        }
+    }
+    
+    private func providerColor(_ provider: String) -> Color {
+        switch provider {
+        case "claude": return .orange
+        case "chatgpt": return Color(red: 16/255, green: 163/255, blue: 127/255)
+        case "gemini": return Color(red: 26/255, green: 115/255, blue: 232/255)
+        case "perplexity": return Color(red: 25/255, green: 161/255, blue: 183/255)
+        case "antigravity": return Color(red: 142/255, green: 68/255, blue: 173/255)
+        default: return .secondary
+        }
+    }
+}
+
+// MARK: - Help Popover Button
+
+struct HelpButton: View {
+    let title: String
+    let content: String
+    @State private var showPopover = false
+    
+    var body: some View {
+        Button(action: { showPopover.toggle() }) {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 14))
+                .foregroundColor(.secondary)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showPopover, arrowEdge: .trailing) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.primary)
+                Divider()
+                Text(content)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(12)
+            .frame(width: 280)
         }
     }
 }

@@ -5,6 +5,7 @@ echo "=== Building Claude Usage macOS Menu Bar App & Widget ==="
 
 # Clean previous build
 echo "Cleaning old build files..."
+pkill ClaudeUsage || true
 rm -rf ClaudeUsage ClaudeUsage.app
 
 # Find macOS SDK path

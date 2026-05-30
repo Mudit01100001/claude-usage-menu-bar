@@ -104,6 +104,9 @@ class AppState: ObservableObject {
     // Primary provider to show in menu bar
     @Published var primaryProvider: String = "claude" // "claude", "chatgpt", "gemini", "perplexity", "antigravity", "all"
     
+    // Order of providers
+    @Published var providerOrder: [String] = ["claude", "chatgpt", "gemini", "perplexity", "antigravity"]
+    
     // Runtime Stats Publisher
     @Published var isFetching: Bool = false
     @Published var lastFetchTime: Date? = nil
@@ -184,6 +187,19 @@ class AppState: ObservableObject {
         
         self.primaryProvider = UserDefaults.standard.string(forKey: "primaryProvider") ?? "claude"
         
+        if let savedOrder = UserDefaults.standard.stringArray(forKey: "providerOrder") {
+            let validProviders = ["claude", "chatgpt", "gemini", "perplexity", "antigravity"]
+            var newOrder = savedOrder.filter { validProviders.contains($0) }
+            for p in validProviders {
+                if !newOrder.contains(p) {
+                    newOrder.append(p)
+                }
+            }
+            self.providerOrder = newOrder
+        } else {
+            self.providerOrder = ["claude", "chatgpt", "gemini", "perplexity", "antigravity"]
+        }
+        
         if let time = UserDefaults.standard.object(forKey: "lastFetchTime") as? Date {
             self.lastFetchTime = time
         }
@@ -239,6 +255,7 @@ class AppState: ObservableObject {
         UserDefaults.standard.set(antigravityCurrentUsage, forKey: "antigravityCurrentUsage")
         
         UserDefaults.standard.set(primaryProvider, forKey: "primaryProvider")
+        UserDefaults.standard.set(providerOrder, forKey: "providerOrder")
         
         // Securely save credentials to Keychain
         if !sessionKey.isEmpty {
@@ -891,22 +908,29 @@ class AppState: ObservableObject {
     private func consolidateBuckets() {
         var allBuckets: [UsageBucket] = []
         
-        allBuckets.append(contentsOf: claudeBuckets)
-        
-        if chatgptEnabled {
-            allBuckets.append(contentsOf: chatgptBuckets)
-        }
-        
-        if geminiEnabled {
-            allBuckets.append(contentsOf: geminiBuckets)
-        }
-        
-        if perplexityEnabled {
-            allBuckets.append(contentsOf: perplexityBuckets)
-        }
-        
-        if antigravityEnabled {
-            allBuckets.append(contentsOf: antigravityBuckets)
+        for provider in providerOrder {
+            switch provider {
+            case "claude":
+                allBuckets.append(contentsOf: claudeBuckets)
+            case "chatgpt":
+                if chatgptEnabled {
+                    allBuckets.append(contentsOf: chatgptBuckets)
+                }
+            case "gemini":
+                if geminiEnabled {
+                    allBuckets.append(contentsOf: geminiBuckets)
+                }
+            case "perplexity":
+                if perplexityEnabled {
+                    allBuckets.append(contentsOf: perplexityBuckets)
+                }
+            case "antigravity":
+                if antigravityEnabled {
+                    allBuckets.append(contentsOf: antigravityBuckets)
+                }
+            default:
+                break
+            }
         }
         
         self.usageBuckets = allBuckets
@@ -919,6 +943,22 @@ class AppState: ObservableObject {
         UserDefaults.standard.set(self.lastFetchTime, forKey: "lastFetchTime")
         
         self.updateSharedWidgetData()
+    }
+    
+    func moveProviderUp(_ provider: String) {
+        guard let index = providerOrder.firstIndex(of: provider), index > 0 else { return }
+        providerOrder.swapAt(index, index - 1)
+        saveSettings()
+        consolidateBuckets()
+        NotificationCenter.default.post(name: Notification.Name("UpdateMenuBarText"), object: nil)
+    }
+    
+    func moveProviderDown(_ provider: String) {
+        guard let index = providerOrder.firstIndex(of: provider), index < providerOrder.count - 1 else { return }
+        providerOrder.swapAt(index, index + 1)
+        saveSettings()
+        consolidateBuckets()
+        NotificationCenter.default.post(name: Notification.Name("UpdateMenuBarText"), object: nil)
     }
     
     func toggleLaunchAtLogin(enabled: Bool) {

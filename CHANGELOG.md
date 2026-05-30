@@ -4,6 +4,18 @@ All notable changes to the Claude Usage macOS Menu Bar App will be documented in
 
 ---
 
+## [1.3.0] - 2026-05-30
+
+### Added
+- **Interactive Provider Reordering:** Added Up/Down controls to reorder tracking sources (Claude, ChatGPT, Gemini, Perplexity, Antigravity) dynamically across the Dashboard and the Menu Bar dropdown lists.
+- **Help Popovers:** Integrated `(?)` buttons next to method selectors to clarify Web Session, OAuth CLI, API Key, Prepaid Balance, and Simulation modes.
+- **Separated Connection & Visibility:** Relocated enablement switches from Connection tabs into the Menu Bar display pane, keeping credentials separate from visibility settings.
+- **Resizable Window:** Modified the main Settings view and AppKit window style mask to fully support resizing.
+- **Apple Design Language Polish:** Revamped sidebar buttons with native hover states, proper system spacing, and modern iconography (`menubar.rectangle`).
+- **Build Cleanup:** Integrated automatic `pkill` termination of running app instances within the build pipeline.
+
+---
+
 ## [1.2.0] - 2026-05-27
 
 ### Fixed

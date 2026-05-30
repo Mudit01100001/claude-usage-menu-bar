@@ -74,6 +74,36 @@ class AppState: ObservableObject {
     @Published var thresholdNotification: Double = 80 // percentage
     @Published var enableNotifications: Bool = true
     
+    // New Settings Publishers for ChatGPT
+    @Published var chatgptEnabled: Bool = false
+    @Published var chatgptMethod: String = "simulated" // "api_key" or "simulated"
+    @Published var chatgptApiKey: String = ""
+    @Published var chatgptMonthlyLimit: Double = 20.0
+    @Published var chatgptCurrentUsage: Double = 4.25 // Default simulated usage
+    
+    // New Settings Publishers for Gemini
+    @Published var geminiEnabled: Bool = false
+    @Published var geminiMethod: String = "simulated" // "api_key" or "simulated"
+    @Published var geminiApiKey: String = ""
+    @Published var geminiDailyLimit: Double = 1500.0
+    @Published var geminiCurrentUsage: Double = 180.0 // Default simulated usage
+    
+    // New Settings Publishers for Perplexity
+    @Published var perplexityEnabled: Bool = false
+    @Published var perplexityMethod: String = "simulated" // "api_key" or "simulated"
+    @Published var perplexityApiKey: String = ""
+    @Published var perplexityLimit: Double = 10.0
+    @Published var perplexityCurrentUsage: Double = 2.50 // Default simulated usage
+    
+    // New Settings Publishers for Antigravity
+    @Published var antigravityEnabled: Bool = false
+    @Published var antigravityMethod: String = "local_tracker" // "local_tracker" or "simulated"
+    @Published var antigravityLimit: Double = 100.0
+    @Published var antigravityCurrentUsage: Double = 15.0 // Default/live usage
+    
+    // Primary provider to show in menu bar
+    @Published var primaryProvider: String = "claude" // "claude", "chatgpt", "gemini", "perplexity", "antigravity", "all"
+    
     // Runtime Stats Publisher
     @Published var isFetching: Bool = false
     @Published var lastFetchTime: Date? = nil
@@ -86,8 +116,18 @@ class AppState: ObservableObject {
     @Published var showMenuBarIcon: Bool = true
     @Published var launchAtLogin: Bool = false
     
-    // Keychain service key for storing our custom Web sessionKey securely
+    // Private bucket storage for consolidation
+    private var claudeBuckets: [UsageBucket] = []
+    private var chatgptBuckets: [UsageBucket] = []
+    private var geminiBuckets: [UsageBucket] = []
+    private var perplexityBuckets: [UsageBucket] = []
+    private var antigravityBuckets: [UsageBucket] = []
+    
+    // Keychain service keys for storing credentials securely
     private let sessionKeyKeychainKey = "com.mudit.ClaudeUsage.sessionKey"
+    private let chatgptKeyKeychainKey = "com.mudit.ClaudeUsage.openaiKey"
+    private let geminiKeyKeychainKey = "com.mudit.ClaudeUsage.geminiKey"
+    private let perplexityKeyKeychainKey = "com.mudit.ClaudeUsage.perplexityKey"
     
     private var localServer: LocalUsageServer?
     
@@ -114,6 +154,36 @@ class AppState: ObservableObject {
         self.displayMode = UserDefaults.standard.string(forKey: "displayMode") ?? "stacked"
         self.showMenuBarIcon = UserDefaults.standard.object(forKey: "showMenuBarIcon") as? Bool ?? true
         
+        self.chatgptEnabled = UserDefaults.standard.bool(forKey: "chatgptEnabled")
+        self.chatgptMethod = UserDefaults.standard.string(forKey: "chatgptMethod") ?? "simulated"
+        self.chatgptMonthlyLimit = UserDefaults.standard.double(forKey: "chatgptMonthlyLimit")
+        if self.chatgptMonthlyLimit == 0 { self.chatgptMonthlyLimit = 20.0 }
+        self.chatgptCurrentUsage = UserDefaults.standard.double(forKey: "chatgptCurrentUsage")
+        if self.chatgptCurrentUsage == 0 { self.chatgptCurrentUsage = 4.25 }
+        
+        self.geminiEnabled = UserDefaults.standard.bool(forKey: "geminiEnabled")
+        self.geminiMethod = UserDefaults.standard.string(forKey: "geminiMethod") ?? "simulated"
+        self.geminiDailyLimit = UserDefaults.standard.double(forKey: "geminiDailyLimit")
+        if self.geminiDailyLimit == 0 { self.geminiDailyLimit = 1500.0 }
+        self.geminiCurrentUsage = UserDefaults.standard.double(forKey: "geminiCurrentUsage")
+        if self.geminiCurrentUsage == 0 { self.geminiCurrentUsage = 180.0 }
+        
+        self.perplexityEnabled = UserDefaults.standard.bool(forKey: "perplexityEnabled")
+        self.perplexityMethod = UserDefaults.standard.string(forKey: "perplexityMethod") ?? "simulated"
+        self.perplexityLimit = UserDefaults.standard.double(forKey: "perplexityLimit")
+        if self.perplexityLimit == 0 { self.perplexityLimit = 10.0 }
+        self.perplexityCurrentUsage = UserDefaults.standard.double(forKey: "perplexityCurrentUsage")
+        if self.perplexityCurrentUsage == 0 { self.perplexityCurrentUsage = 2.50 }
+        
+        self.antigravityEnabled = UserDefaults.standard.bool(forKey: "antigravityEnabled")
+        self.antigravityMethod = UserDefaults.standard.string(forKey: "antigravityMethod") ?? "local_tracker"
+        self.antigravityLimit = UserDefaults.standard.double(forKey: "antigravityLimit")
+        if self.antigravityLimit == 0 { self.antigravityLimit = 100.0 }
+        self.antigravityCurrentUsage = UserDefaults.standard.double(forKey: "antigravityCurrentUsage")
+        if self.antigravityCurrentUsage == 0 { self.antigravityCurrentUsage = 15.0 }
+        
+        self.primaryProvider = UserDefaults.standard.string(forKey: "primaryProvider") ?? "claude"
+        
         if let time = UserDefaults.standard.object(forKey: "lastFetchTime") as? Date {
             self.lastFetchTime = time
         }
@@ -124,9 +194,18 @@ class AppState: ObservableObject {
             self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         }
         
-        // Securely retrieve the web sessionKey from Keychain
+        // Securely retrieve the keys from Keychain
         if let key = KeychainHelper.load(service: sessionKeyKeychainKey) {
             self.sessionKey = key
+        }
+        if let key = KeychainHelper.load(service: chatgptKeyKeychainKey) {
+            self.chatgptApiKey = key
+        }
+        if let key = KeychainHelper.load(service: geminiKeyKeychainKey) {
+            self.geminiApiKey = key
+        }
+        if let key = KeychainHelper.load(service: perplexityKeyKeychainKey) {
+            self.perplexityApiKey = key
         }
     }
     
@@ -139,44 +218,106 @@ class AppState: ObservableObject {
         UserDefaults.standard.set(displayMode, forKey: "displayMode")
         UserDefaults.standard.set(showMenuBarIcon, forKey: "showMenuBarIcon")
         
-        // Securely save the web sessionKey to Keychain
+        UserDefaults.standard.set(chatgptEnabled, forKey: "chatgptEnabled")
+        UserDefaults.standard.set(chatgptMethod, forKey: "chatgptMethod")
+        UserDefaults.standard.set(chatgptMonthlyLimit, forKey: "chatgptMonthlyLimit")
+        UserDefaults.standard.set(chatgptCurrentUsage, forKey: "chatgptCurrentUsage")
+        
+        UserDefaults.standard.set(geminiEnabled, forKey: "geminiEnabled")
+        UserDefaults.standard.set(geminiMethod, forKey: "geminiMethod")
+        UserDefaults.standard.set(geminiDailyLimit, forKey: "geminiDailyLimit")
+        UserDefaults.standard.set(geminiCurrentUsage, forKey: "geminiCurrentUsage")
+        
+        UserDefaults.standard.set(perplexityEnabled, forKey: "perplexityEnabled")
+        UserDefaults.standard.set(perplexityMethod, forKey: "perplexityMethod")
+        UserDefaults.standard.set(perplexityLimit, forKey: "perplexityLimit")
+        UserDefaults.standard.set(perplexityCurrentUsage, forKey: "perplexityCurrentUsage")
+        
+        UserDefaults.standard.set(antigravityEnabled, forKey: "antigravityEnabled")
+        UserDefaults.standard.set(antigravityMethod, forKey: "antigravityMethod")
+        UserDefaults.standard.set(antigravityLimit, forKey: "antigravityLimit")
+        UserDefaults.standard.set(antigravityCurrentUsage, forKey: "antigravityCurrentUsage")
+        
+        UserDefaults.standard.set(primaryProvider, forKey: "primaryProvider")
+        
+        // Securely save credentials to Keychain
         if !sessionKey.isEmpty {
             KeychainHelper.save(service: sessionKeyKeychainKey, value: sessionKey)
         } else {
             KeychainHelper.delete(service: sessionKeyKeychainKey)
         }
+        
+        if !chatgptApiKey.isEmpty {
+            KeychainHelper.save(service: chatgptKeyKeychainKey, value: chatgptApiKey)
+        } else {
+            KeychainHelper.delete(service: chatgptKeyKeychainKey)
+        }
+        
+        if !geminiApiKey.isEmpty {
+            KeychainHelper.save(service: geminiKeyKeychainKey, value: geminiApiKey)
+        } else {
+            KeychainHelper.delete(service: geminiKeyKeychainKey)
+        }
+        
+        if !perplexityApiKey.isEmpty {
+            KeychainHelper.save(service: perplexityKeyKeychainKey, value: perplexityApiKey)
+        } else {
+            KeychainHelper.delete(service: perplexityKeyKeychainKey)
+        }
     }
     
     // Core function to refresh usage based on chosen method
+    // Core function to refresh usage across all active providers
     func refreshUsage(completion: (() -> Void)? = nil) {
         DispatchQueue.main.async {
             self.isFetching = true
             self.errorMessage = nil
         }
         
-        if selectedMethod == "web" {
-            guard !sessionKey.isEmpty else {
-                updateStateWithError("Web Session Key is not set in settings.")
-                completion?()
-                return
+        let group = DispatchGroup()
+        
+        // --- 1. CLAUDE ---
+        group.enter()
+        refreshClaudeUsage {
+            group.leave()
+        }
+        
+        // --- 2. CHATGPT ---
+        if chatgptEnabled {
+            group.enter()
+            refreshChatGPTUsage {
+                group.leave()
             }
-            fetchWebUsage(sessionKey: sessionKey, completion: completion)
-        } else {
-            // CLI method: read from keychain
-            guard let credentialsJSONString = KeychainHelper.scanClaudeCodeCredentials() else {
-                updateStateWithError("Could not find Claude Code credentials in your Keychain. Please run 'claude login' in your terminal first.")
-                completion?()
-                return
+        }
+        
+        // --- 3. GEMINI ---
+        if geminiEnabled {
+            group.enter()
+            refreshGeminiUsage {
+                group.leave()
             }
-            
-            // Parse token
-            guard let token = parseAccessToken(from: credentialsJSONString) else {
-                updateStateWithError("Failed to parse access token from Claude Code Keychain credentials. Try re-authenticating with 'claude login'.")
-                completion?()
-                return
+        }
+        
+        // --- 4. PERPLEXITY ---
+        if perplexityEnabled {
+            group.enter()
+            refreshPerplexityUsage {
+                group.leave()
             }
-            
-            fetchCliUsage(token: token, completion: completion)
+        }
+        
+        // --- 5. ANTIGRAVITY ---
+        if antigravityEnabled {
+            group.enter()
+            refreshAntigravityUsage {
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) {
+            self.consolidateBuckets()
+            self.isFetching = false
+            completion?()
         }
     }
     
@@ -200,14 +341,12 @@ class AppState: ObservableObject {
             let parsed = try JSONDecoder().decode(ClaudeCodeCredentialsJSON.self, from: data)
             return parsed.claudeAiOauth.accessToken
         } catch {
-            // Also try legacy direct format if it exists
             struct DirectTokenJSON: Codable {
                 let accessToken: String
             }
             if let parsedDirect = try? JSONDecoder().decode(DirectTokenJSON.self, from: data) {
                 return parsedDirect.accessToken
             }
-            // If it's a raw string in the Keychain (some setups do this)
             if jsonStr.count > 30 && !jsonStr.contains("{") {
                 return jsonStr
             }
@@ -215,26 +354,53 @@ class AppState: ObservableObject {
         }
     }
     
-    // MARK: - Web API Fetching
+    // MARK: - Claude Fetch & Parse
     
-    private func fetchWebUsage(sessionKey: String, completion: (() -> Void)?) {
-        if self.orgUuid.isEmpty {
-            fetchWebOrgUuid(sessionKey: sessionKey) { [weak self] result in
-                guard let self = self else { return }
-                switch result {
-                case .success(let uuid):
-                    DispatchQueue.main.async {
-                        self.orgUuid = uuid
-                        self.saveSettings()
+    private func refreshClaudeUsage(completion: @escaping () -> Void) {
+        if selectedMethod == "web" {
+            guard !sessionKey.isEmpty else {
+                self.claudeBuckets = []
+                completion()
+                return
+            }
+            
+            if self.orgUuid.isEmpty {
+                fetchWebOrgUuid(sessionKey: sessionKey) { [weak self] result in
+                    guard let self = self else { completion(); return }
+                    switch result {
+                    case .success(let uuid):
+                        DispatchQueue.main.async {
+                            self.orgUuid = uuid
+                            self.saveSettings()
+                        }
+                        self.fetchClaudeWebUsageDetails(sessionKey: sessionKey, orgUuid: uuid) { buckets in
+                            self.claudeBuckets = buckets
+                            completion()
+                        }
+                    case .failure(let error):
+                        print("Failed to get organization ID: \(error.localizedDescription)")
+                        self.claudeBuckets = []
+                        completion()
                     }
-                    self.fetchWebUsageDetails(sessionKey: sessionKey, orgUuid: uuid, completion: completion)
-                case .failure(let error):
-                    self.updateStateWithError("Failed to get organization ID: \(error.localizedDescription)")
-                    completion?()
+                }
+            } else {
+                fetchClaudeWebUsageDetails(sessionKey: sessionKey, orgUuid: self.orgUuid) { buckets in
+                    self.claudeBuckets = buckets
+                    completion()
                 }
             }
         } else {
-            fetchWebUsageDetails(sessionKey: sessionKey, orgUuid: self.orgUuid, completion: completion)
+            guard let credentialsJSONString = KeychainHelper.scanClaudeCodeCredentials(),
+                  let token = parseAccessToken(from: credentialsJSONString) else {
+                self.claudeBuckets = []
+                completion()
+                return
+            }
+            
+            fetchClaudeCliUsage(token: token) { buckets in
+                self.claudeBuckets = buckets
+                completion()
+            }
         }
     }
     
@@ -246,6 +412,7 @@ class AppState: ObservableObject {
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = 5.0
         request.addValue("sessionKey=\(sessionKey)", forHTTPHeaderField: "Cookie")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
@@ -262,7 +429,7 @@ class AppState: ObservableObject {
             }
             
             guard httpResponse.statusCode == 200 else {
-                completion(.failure(NSError(domain: "HTTP Error", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Server returned code \(httpResponse.statusCode). Your session key may be invalid or expired."])))
+                completion(.failure(NSError(domain: "HTTP Error", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Server returned code \(httpResponse.statusCode)."])))
                 return
             }
             
@@ -279,7 +446,7 @@ class AppState: ObservableObject {
                 if let firstOrg = orgs.first {
                     completion(.success(firstOrg.uuid))
                 } else {
-                    completion(.failure(NSError(domain: "No Org Found", code: 0, userInfo: [NSLocalizedDescriptionKey: "No organizations found in your Claude account."])))
+                    completion(.failure(NSError(domain: "No Org Found", code: 0, userInfo: nil)))
                 }
             } catch {
                 completion(.failure(error))
@@ -288,103 +455,80 @@ class AppState: ObservableObject {
         task.resume()
     }
     
-    private func fetchWebUsageDetails(sessionKey: String, orgUuid: String, completion: (() -> Void)?) {
+    private func fetchClaudeWebUsageDetails(sessionKey: String, orgUuid: String, completion: @escaping ([UsageBucket]) -> Void) {
         guard let url = URL(string: "https://claude.ai/api/organizations/\(orgUuid)/usage") else {
-            updateStateWithError("Invalid usage URL.")
-            completion?()
+            completion([])
             return
         }
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = 5.0
         request.addValue("sessionKey=\(sessionKey)", forHTTPHeaderField: "Cookie")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
         
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self else { return }
-            
+            guard let self = self else { completion([]); return }
             if let error = error {
-                self.updateStateWithError(error.localizedDescription)
-                completion?()
+                print("Claude web details error: \(error.localizedDescription)")
+                completion([])
                 return
             }
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
-                self.updateStateWithError("Invalid server response.")
-                completion?()
-                return
-            }
-            
-            guard httpResponse.statusCode == 200 else {
-                self.updateStateWithError("HTTP Error \(httpResponse.statusCode). Check if your sessionKey has expired.")
-                completion?()
-                return
-            }
-            
-            guard let data = data else {
-                self.updateStateWithError("Server returned no data.")
-                completion?()
-                return
-            }
-            
-            self.parseAndPublishBuckets(data: data)
-            completion?()
+            guard let data = data else { completion([]); return }
+            let buckets = self.parseClaudeBuckets(data: data)
+            completion(buckets)
         }
         task.resume()
     }
     
-    // MARK: - CLI API Fetching
-    
-    private func fetchCliUsage(token: String, isRetry: Bool = false, completion: (() -> Void)?) {
+    private func fetchClaudeCliUsage(token: String, isRetry: Bool = false, completion: @escaping ([UsageBucket]) -> Void) {
         guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
-            updateStateWithError("Invalid OAuth usage URL.")
-            completion?()
+            completion([])
             return
         }
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = 5.0
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("claude-code/2.1.34", forHTTPHeaderField: "User-Agent")
         
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self else { return }
+            guard let self = self else { completion([]); return }
             
             if let error = error {
-                self.updateStateWithError(error.localizedDescription)
-                completion?()
+                print("Claude CLI error: \(error.localizedDescription)")
+                completion([])
                 return
             }
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                self.updateStateWithError("Invalid server response.")
-                completion?()
+                completion([])
                 return
             }
             
             if httpResponse.statusCode == 401 && !isRetry {
-                print("HTTP 401 received. Attempting to scan keychain/refresh token...")
-                self.handleCliUnauthorized(attemptedToken: token, completion: completion)
+                self.handleCliUnauthorized(attemptedToken: token) {
+                    if let credentialsJSONString = KeychainHelper.scanClaudeCodeCredentials(),
+                       let newToken = self.parseAccessToken(from: credentialsJSONString) {
+                        self.fetchClaudeCliUsage(token: newToken, isRetry: true, completion: completion)
+                    } else {
+                        completion([])
+                    }
+                }
                 return
             }
             
-            guard httpResponse.statusCode == 200 else {
-                self.updateStateWithError("HTTP Error \(httpResponse.statusCode). Your Claude Code token might have expired. Try running 'claude logout' then 'claude login'.")
-                completion?()
+            guard httpResponse.statusCode == 200, let data = data else {
+                completion([])
                 return
             }
             
-            guard let data = data else {
-                self.updateStateWithError("Server returned no data.")
-                completion?()
-                return
-            }
-            
-            self.parseAndPublishBuckets(data: data)
-            completion?()
+            let buckets = self.parseClaudeBuckets(data: data)
+            completion(buckets)
         }
         task.resume()
     }
@@ -396,37 +540,29 @@ class AppState: ObservableObject {
             return
         }
         
-        // Extract the latest token from keychain
         guard let currentToken = parseAccessToken(from: credentialsJSONString) else {
             updateStateWithError("Failed to parse access token from Keychain credentials.")
             completion?()
             return
         }
         
-        // Case 1: The keychain already contains a different token (refreshed by CLI or other process)
         if currentToken != attemptedToken {
-            print("Detected a different token in keychain. Retrying request...")
-            fetchCliUsage(token: currentToken, isRetry: true, completion: completion)
-            return
-        }
-        
-        // Case 2: The token in keychain is the same, meaning we must refresh it ourselves in the background
-        guard let refreshToken = parseRefreshToken(from: credentialsJSONString) else {
-            updateStateWithError("Claude Code credentials do not contain a refresh token. Try running 'claude login'.")
             completion?()
             return
         }
         
-        print("Token is expired. Attempting background OAuth refresh...")
-        refreshOAuthToken(refreshToken: refreshToken, credentialsJSONString: credentialsJSONString) { [weak self] result in
-            guard let self = self else { return }
+        guard let refreshToken = parseRefreshToken(from: credentialsJSONString) else {
+            updateStateWithError("Claude Code credentials do not contain a refresh token.")
+            completion?()
+            return
+        }
+        
+        refreshOAuthToken(refreshToken: refreshToken, credentialsJSONString: credentialsJSONString) { result in
             switch result {
-            case .success(let newAccessToken):
-                print("Background OAuth refresh succeeded! Retrying request...")
-                self.fetchCliUsage(token: newAccessToken, isRetry: true, completion: completion)
+            case .success(_):
+                completion?()
             case .failure(let error):
-                print("Background OAuth refresh failed: \(error.localizedDescription)")
-                self.updateStateWithError("Session expired (HTTP 401) and background refresh failed: \(error.localizedDescription)")
+                self.updateStateWithError("Session expired and background refresh failed: \(error.localizedDescription)")
                 completion?()
             }
         }
@@ -449,6 +585,7 @@ class AppState: ObservableObject {
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 5.0
         request.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.addValue("claude-code/2.1.34", forHTTPHeaderField: "User-Agent")
         
@@ -468,18 +605,17 @@ class AppState: ObservableObject {
             }
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                completion(.failure(NSError(domain: "Invalid Response", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid server response"])))
+                completion(.failure(NSError(domain: "Invalid Response", code: 0, userInfo: nil)))
                 return
             }
             
             guard httpResponse.statusCode == 200 else {
-                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                completion(.failure(NSError(domain: "HTTP Error", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "OAuth refresh failed (HTTP \(httpResponse.statusCode)): \(body)"])))
+                completion(.failure(NSError(domain: "HTTP Error", code: httpResponse.statusCode, userInfo: nil)))
                 return
             }
             
             guard let data = data else {
-                completion(.failure(NSError(domain: "No Data", code: 0, userInfo: [NSLocalizedDescriptionKey: "Server returned no data on refresh"])))
+                completion(.failure(NSError(domain: "No Data", code: 0, userInfo: nil)))
                 return
             }
             
@@ -488,14 +624,13 @@ class AppState: ObservableObject {
                       let newAccessToken = json["access_token"] as? String,
                       let newRefreshToken = json["refresh_token"] as? String,
                       let expiresIn = json["expires_in"] as? Int else {
-                    completion(.failure(NSError(domain: "Parse Error", code: 0, userInfo: [NSLocalizedDescriptionKey: "Response missing token fields"])))
+                    completion(.failure(NSError(domain: "Parse Error", code: 0, userInfo: nil)))
                     return
                 }
                 
-                // Parse the original credentials JSON, update it, and write it back
                 guard let origData = credentialsJSONString.data(using: .utf8),
                       var credsDict = try JSONSerialization.jsonObject(with: origData, options: [.mutableContainers]) as? [String: Any] else {
-                    completion(.failure(NSError(domain: "Parse Error", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to parse original credentials for updating"])))
+                    completion(.failure(NSError(domain: "Parse Error", code: 0, userInfo: nil)))
                     return
                 }
                 
@@ -507,13 +642,13 @@ class AppState: ObservableObject {
                 
                 let updatedData = try JSONSerialization.data(withJSONObject: credsDict, options: [.prettyPrinted])
                 guard let updatedStr = String(data: updatedData, encoding: .utf8) else {
-                    completion(.failure(NSError(domain: "Serialization Error", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to serialize updated credentials"])))
+                    completion(.failure(NSError(domain: "Serialization Error", code: 0, userInfo: nil)))
                     return
                 }
                 
                 let writeSuccess = KeychainHelper.writeClaudeCodeCredentials(value: updatedStr)
                 if !writeSuccess {
-                    completion(.failure(NSError(domain: "Keychain Error", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to save refreshed credentials to Keychain"])))
+                    completion(.failure(NSError(domain: "Keychain Error", code: 0, userInfo: nil)))
                     return
                 }
                 
@@ -525,16 +660,11 @@ class AppState: ObservableObject {
         }
         task.resume()
     }
-
     
-    // MARK: - Helper Parsing
-    
-    private func parseAndPublishBuckets(data: Data) {
+    private func parseClaudeBuckets(data: Data) -> [UsageBucket] {
         do {
-            // Parse as generic JSON dict since keys vary (five_hour, seven_day, extra_usage, etc.)
             guard let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
-                updateStateWithError("Unexpected response format.")
-                return
+                return []
             }
             var tempBuckets: [UsageBucket] = []
             
@@ -542,7 +672,6 @@ class AppState: ObservableObject {
                 guard let val = value as? [String: Any] else { continue }
                 
                 if key == "extra_usage" {
-                    // Extra usage has a special structure: is_enabled, used_credits, monthly_limit, utilization
                     if let isEnabled = val["is_enabled"] as? Bool, isEnabled,
                        let utilization = val["utilization"] as? Double {
                         let usedCents = val["used_credits"] as? Int ?? 0
@@ -556,7 +685,6 @@ class AppState: ObservableObject {
                         ))
                     }
                 } else {
-                    // Standard bucket: five_hour, seven_day, seven_day_sonnet, etc.
                     if let utilization = val["utilization"] as? Double,
                        let resetsAtStr = val["resets_at"] as? String {
                         tempBuckets.append(UsageBucket(
@@ -568,30 +696,229 @@ class AppState: ObservableObject {
                 }
             }
             
-            // Sort buckets: 5-hour first, then 7-day, then others, extra_usage last
             tempBuckets.sort { a, b in
                 let order = ["five_hour": 0, "seven_day": 1, "seven_day_sonnet": 2, "seven_day_opus": 3, "extra_usage": 99]
                 return (order[a.name] ?? 50) < (order[b.name] ?? 50)
             }
-            
-            DispatchQueue.main.async {
-                self.usageBuckets = tempBuckets
-                self.lastFetchTime = Date()
-                self.isFetching = false
-                self.errorMessage = nil
-                
-                // Cache the buckets in UserDefaults
-                if let encoded = try? JSONEncoder().encode(tempBuckets) {
-                    UserDefaults.standard.set(encoded, forKey: "cachedBuckets")
-                }
-                UserDefaults.standard.set(self.lastFetchTime, forKey: "lastFetchTime")
-                
-                // Export data to shared App Group for WidgetKit widget
-                self.updateSharedWidgetData()
-            }
+            return tempBuckets
         } catch {
-            updateStateWithError("Failed to parse usage data: \(error.localizedDescription)")
+            print("Failed to parse Claude usage data: \(error)")
+            return []
         }
+    }
+    
+    // MARK: - ChatGPT Fetch
+    
+    private func refreshChatGPTUsage(completion: @escaping () -> Void) {
+        if chatgptMethod == "simulated" {
+            let util = min((chatgptCurrentUsage / chatgptMonthlyLimit) * 100.0, 100.0)
+            let resetsStr = String(format: "$%.2f / $%.2f monthly", chatgptCurrentUsage, chatgptMonthlyLimit)
+            self.chatgptBuckets = [
+                UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr)
+            ]
+            completion()
+        } else {
+            guard !chatgptApiKey.isEmpty else {
+                let resetsStr = "API Key missing"
+                self.chatgptBuckets = [
+                    UsageBucket(name: "chatgpt_api", utilization: 0.0, resetsAt: resetsStr)
+                ]
+                completion()
+                return
+            }
+            
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            let todayStr = formatter.string(from: Date())
+            
+            guard let url = URL(string: "https://api.openai.com/v1/usage?date=\(todayStr)") else {
+                completion()
+                return
+            }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = 5.0
+            request.addValue("Bearer \(chatgptApiKey)", forHTTPHeaderField: "Authorization")
+            
+            let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+                guard let self = self else { completion(); return }
+                if let error = error {
+                    print("OpenAI fetch error: \(error.localizedDescription)")
+                    let util = min((self.chatgptCurrentUsage / self.chatgptMonthlyLimit) * 100.0, 100.0)
+                    let resetsStr = String(format: "$%.2f / $%.2f (Offline)", self.chatgptCurrentUsage, self.chatgptMonthlyLimit)
+                    self.chatgptBuckets = [
+                        UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr)
+                    ]
+                    completion()
+                    return
+                }
+                
+                guard let data = data else {
+                    completion()
+                    return
+                }
+                
+                struct OpenAIUsageResponse: Codable {
+                    struct UsageItem: Codable {
+                        let n_context_tokens: Double?
+                        let n_generated_tokens: Double?
+                        let n_requests: Int?
+                    }
+                    let data: [UsageItem]?
+                }
+                
+                do {
+                    let decoded = try JSONDecoder().decode(OpenAIUsageResponse.self, from: data)
+                    var dailyCost = 0.0
+                    if let items = decoded.data {
+                        for item in items {
+                            let promptT = item.n_context_tokens ?? 0.0
+                            let compT = item.n_generated_tokens ?? 0.0
+                            dailyCost += (promptT * 0.0000025) + (compT * 0.000010)
+                        }
+                    }
+                    
+                    DispatchQueue.main.async {
+                        self.chatgptCurrentUsage = dailyCost
+                        self.saveSettings()
+                    }
+                    
+                    let util = min((dailyCost / self.chatgptMonthlyLimit) * 100.0, 100.0)
+                    let resetsStr = String(format: "$%.4f / $%.2f daily cost", dailyCost, self.chatgptMonthlyLimit)
+                    self.chatgptBuckets = [
+                        UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr)
+                    ]
+                    completion()
+                } catch {
+                    let util = min((self.chatgptCurrentUsage / self.chatgptMonthlyLimit) * 100.0, 100.0)
+                    let resetsStr = String(format: "$%.2f / $%.2f (Parse error)", self.chatgptCurrentUsage, self.chatgptMonthlyLimit)
+                    self.chatgptBuckets = [
+                        UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr)
+                    ]
+                    completion()
+                }
+            }
+            task.resume()
+        }
+    }
+    
+    // MARK: - Gemini Fetch
+    
+    private func refreshGeminiUsage(completion: @escaping () -> Void) {
+        let util = min((geminiCurrentUsage / geminiDailyLimit) * 100.0, 100.0)
+        let resetsStr = String(format: "%d / %d daily requests", Int(geminiCurrentUsage), Int(geminiDailyLimit))
+        self.geminiBuckets = [
+            UsageBucket(name: "gemini_api", utilization: util, resetsAt: resetsStr)
+        ]
+        completion()
+    }
+    
+    // MARK: - Perplexity Fetch
+    
+    private func refreshPerplexityUsage(completion: @escaping () -> Void) {
+        let util = min((perplexityCurrentUsage / perplexityLimit) * 100.0, 100.0)
+        let resetsStr = String(format: "$%.2f / $%.2f credits", perplexityCurrentUsage, perplexityLimit)
+        self.perplexityBuckets = [
+            UsageBucket(name: "perplexity_api", utilization: util, resetsAt: resetsStr)
+        ]
+        completion()
+    }
+    
+    // MARK: - Antigravity Scanner
+    
+    private func refreshAntigravityUsage(completion: @escaping () -> Void) {
+        if antigravityMethod == "simulated" {
+            let util = min((antigravityCurrentUsage / antigravityLimit) * 100.0, 100.0)
+            let resetsStr = String(format: "%d / %d queries", Int(antigravityCurrentUsage), Int(antigravityLimit))
+            self.antigravityBuckets = [
+                UsageBucket(name: "antigravity_usage", utilization: util, resetsAt: resetsStr)
+            ]
+            completion()
+        } else {
+            DispatchQueue.global(qos: .background).async { [weak self] in
+                guard let self = self else { completion(); return }
+                
+                let fileManager = FileManager.default
+                let brainDir = fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".gemini/antigravity/brain")
+                
+                var queryCount = 0
+                var convoCount = 0
+                
+                if fileManager.fileExists(atPath: brainDir.path) {
+                    do {
+                        let contents = try fileManager.contentsOfDirectory(at: brainDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+                        for folder in contents {
+                            var isDir: ObjCBool = false
+                            if fileManager.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue {
+                                convoCount += 1
+                                let logFile = folder.appendingPathComponent(".system_generated/logs/transcript.jsonl")
+                                if fileManager.fileExists(atPath: logFile.path) {
+                                    if let logContents = try? String(contentsOf: logFile, encoding: .utf8) {
+                                        let lines = logContents.components(separatedBy: .newlines)
+                                        for line in lines {
+                                            if line.contains("\"type\":\"USER_INPUT\"") {
+                                                queryCount += 1
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch {
+                        print("Error scanning Antigravity logs: \(error)")
+                    }
+                }
+                
+                let queries = Double(queryCount)
+                DispatchQueue.main.async {
+                    self.antigravityCurrentUsage = queries
+                    self.saveSettings()
+                    
+                    let util = min((queries / self.antigravityLimit) * 100.0, 100.0)
+                    let resetsStr = String(format: "%d / %d queries (%d convos)", Int(queries), Int(self.antigravityLimit), convoCount)
+                    self.antigravityBuckets = [
+                        UsageBucket(name: "antigravity_usage", utilization: util, resetsAt: resetsStr)
+                    ]
+                    completion()
+                }
+            }
+        }
+    }
+    
+    // MARK: - State Consolidation
+    
+    private func consolidateBuckets() {
+        var allBuckets: [UsageBucket] = []
+        
+        allBuckets.append(contentsOf: claudeBuckets)
+        
+        if chatgptEnabled {
+            allBuckets.append(contentsOf: chatgptBuckets)
+        }
+        
+        if geminiEnabled {
+            allBuckets.append(contentsOf: geminiBuckets)
+        }
+        
+        if perplexityEnabled {
+            allBuckets.append(contentsOf: perplexityBuckets)
+        }
+        
+        if antigravityEnabled {
+            allBuckets.append(contentsOf: antigravityBuckets)
+        }
+        
+        self.usageBuckets = allBuckets
+        self.lastFetchTime = Date()
+        
+        // Cache the buckets in UserDefaults
+        if let encoded = try? JSONEncoder().encode(allBuckets) {
+            UserDefaults.standard.set(encoded, forKey: "cachedBuckets")
+        }
+        UserDefaults.standard.set(self.lastFetchTime, forKey: "lastFetchTime")
+        
+        self.updateSharedWidgetData()
     }
     
     func toggleLaunchAtLogin(enabled: Bool) {
@@ -620,36 +947,80 @@ class AppState: ObservableObject {
         }
     }
     
-    private func updateSharedWidgetData() {
-        let session = self.usageBuckets.first(where: { $0.name == "five_hour" })
-        let weekly = self.usageBuckets.first(where: { $0.name == "seven_day" })
+    func computeSharedUsageInfo() -> SharedUsageInfo {
+        var sessionUtil = 0.0
+        var sessionTime = "No data"
+        var weeklyUtil = 0.0
+        var weeklyTime = "No data"
         
-        let sessionUtil = session?.utilization ?? 0.0
-        let sessionTime = session?.timeRemainingString ?? "No data"
-        let weeklyUtil = weekly?.utilization ?? 0.0
-        let weeklyTime = weekly?.timeRemainingString ?? "No data"
+        if primaryProvider == "claude" {
+            let session = self.usageBuckets.first(where: { $0.name == "five_hour" })
+            let weekly = self.usageBuckets.first(where: { $0.name == "seven_day" })
+            sessionUtil = session?.utilization ?? 0.0
+            sessionTime = session?.timeRemainingString ?? "No data"
+            weeklyUtil = weekly?.utilization ?? 0.0
+            weeklyTime = weekly?.timeRemainingString ?? "No data"
+        } else if primaryProvider == "chatgpt" {
+            let bucket = self.usageBuckets.first(where: { $0.name == "chatgpt_api" })
+            sessionUtil = bucket?.utilization ?? 0.0
+            sessionTime = bucket?.timeRemainingString ?? "No data"
+            weeklyUtil = 0.0
+            weeklyTime = "ChatGPT API"
+        } else if primaryProvider == "gemini" {
+            let bucket = self.usageBuckets.first(where: { $0.name == "gemini_api" })
+            sessionUtil = bucket?.utilization ?? 0.0
+            sessionTime = bucket?.timeRemainingString ?? "No data"
+            weeklyUtil = 0.0
+            weeklyTime = "Gemini API"
+        } else if primaryProvider == "perplexity" {
+            let bucket = self.usageBuckets.first(where: { $0.name == "perplexity_api" })
+            sessionUtil = bucket?.utilization ?? 0.0
+            sessionTime = bucket?.timeRemainingString ?? "No data"
+            weeklyUtil = 0.0
+            weeklyTime = "Perplexity API"
+        } else if primaryProvider == "antigravity" {
+            let bucket = self.usageBuckets.first(where: { $0.name == "antigravity_usage" })
+            sessionUtil = bucket?.utilization ?? 0.0
+            sessionTime = bucket?.timeRemainingString ?? "No data"
+            weeklyUtil = 0.0
+            weeklyTime = "Antigravity Agent"
+        } else {
+            let session = self.usageBuckets.first(where: { $0.name == "five_hour" })
+            sessionUtil = session?.utilization ?? 0.0
+            sessionTime = session?.timeRemainingString ?? "No data"
+            
+            if let other = self.usageBuckets.first(where: { $0.name != "five_hour" && $0.name != "seven_day" && $0.name != "extra_usage" }) {
+                weeklyUtil = other.utilization
+                weeklyTime = other.displayName
+            } else {
+                let weekly = self.usageBuckets.first(where: { $0.name == "seven_day" })
+                weeklyUtil = weekly?.utilization ?? 0.0
+                weeklyTime = weekly?.timeRemainingString ?? "No data"
+            }
+        }
         
-        let info = SharedUsageInfo(
+        return SharedUsageInfo(
             sessionUtilization: sessionUtil,
             sessionTimeRemaining: sessionTime,
             weeklyUtilization: weeklyUtil,
             weeklyTimeRemaining: weeklyTime
         )
+    }
+    
+    private func updateSharedWidgetData() {
+        let info = computeSharedUsageInfo()
         
         guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.Mudit01100001.claude-usage") else {
-            // Signal WidgetKit to refresh anyway (it will fetch via HTTP)
             WidgetCenter.shared.reloadAllTimelines()
             return
         }
         
-        // Ensure shared container directory exists
         try? FileManager.default.createDirectory(at: containerURL, withIntermediateDirectories: true, attributes: nil)
         
         let fileURL = containerURL.appendingPathComponent("usage.json")
         do {
             let data = try JSONEncoder().encode(info)
             try data.write(to: fileURL)
-            // Signal WidgetKit to refresh all timeline widgets immediately
             WidgetCenter.shared.reloadAllTimelines()
         } catch {
             print("Failed to write widget data: \(error)")
@@ -728,20 +1099,7 @@ class LocalUsageServer {
     }
     
     private func sendResponse(_ connection: NWConnection) {
-        let session = self.appState.usageBuckets.first(where: { $0.name == "five_hour" })
-        let weekly = self.appState.usageBuckets.first(where: { $0.name == "seven_day" })
-        
-        let sessionUtil = session?.utilization ?? 0.0
-        let sessionTime = session?.timeRemainingString ?? "No data"
-        let weeklyUtil = weekly?.utilization ?? 0.0
-        let weeklyTime = weekly?.timeRemainingString ?? "No data"
-        
-        let info = SharedUsageInfo(
-            sessionUtilization: sessionUtil,
-            sessionTimeRemaining: sessionTime,
-            weeklyUtilization: weeklyUtil,
-            weeklyTimeRemaining: weeklyTime
-        )
+        let info = self.appState.computeSharedUsageInfo()
         
         guard let jsonData = try? JSONEncoder().encode(info),
               let jsonStr = String(data: jsonData, encoding: .utf8) else {

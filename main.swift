@@ -7,17 +7,33 @@ import UserNotifications
 
 class ProgressMenuItemView: NSView {
     let bucketName: String
+    let rawName: String
     let utilization: Double
     let timeRemaining: String
     
-    var barColor: NSColor {
-        if utilization >= 85 { return .systemRed }
-        else if utilization >= 60 { return .systemOrange }
-        else { return .systemGreen }
+    var brandColor: NSColor {
+        if rawName.hasPrefix("chatgpt") {
+            return NSColor(red: 16/255, green: 163/255, blue: 127/255, alpha: 1.0)
+        } else if rawName.hasPrefix("gemini") {
+            return NSColor(red: 26/255, green: 115/255, blue: 232/255, alpha: 1.0)
+        } else if rawName.hasPrefix("perplexity") {
+            return NSColor(red: 25/255, green: 161/255, blue: 183/255, alpha: 1.0)
+        } else if rawName.hasPrefix("antigravity") {
+            return NSColor(red: 142/255, green: 68/255, blue: 173/255, alpha: 1.0)
+        } else {
+            return .systemOrange
+        }
     }
     
-    init(bucketName: String, utilization: Double, timeRemaining: String) {
+    var barColor: NSColor {
+        if utilization >= 90 { return .systemRed }
+        else if utilization >= 75 { return .systemOrange }
+        else { return brandColor }
+    }
+    
+    init(bucketName: String, rawName: String, utilization: Double, timeRemaining: String) {
         self.bucketName = bucketName
+        self.rawName = rawName
         self.utilization = utilization
         self.timeRemaining = timeRemaining
         super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 44))
@@ -132,7 +148,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusItem?.button {
-            button.image = createMenuBarIcon()
+            button.image = createMenuBarIcon(withChar: "C")
             button.imagePosition = .imageLeft
             button.title = "--"
         }
@@ -160,7 +176,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         appMenuItem.submenu = appMenu
         appMenu.addItem(withTitle: "About Claude Usage", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit Claude Usage", action: #selector(quitClicked), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Claude Usage", action: #selector(quitClicked), keyEquivalent: "")
         
         // Edit Menu (crucial for supporting Command+V pasting in accessory app window)
         let editMenuItem = NSMenuItem()
@@ -178,7 +194,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
     
     // MARK: - Menu Bar Icon
     
-    func createMenuBarIcon() -> NSImage {
+    func createMenuBarIcon(withChar char: String) -> NSImage {
         let size = NSSize(width: 14, height: 14)
         let image = NSImage(size: size, flipped: false) { rect in
             let font = NSFont.systemFont(ofSize: 11, weight: .heavy)
@@ -186,7 +202,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                 .font: font,
                 .foregroundColor: NSColor.black
             ]
-            let str = NSAttributedString(string: "C", attributes: attrs)
+            let str = NSAttributedString(string: char, attributes: attrs)
             let strSize = str.size()
             let x = (rect.width - strSize.width) / 2
             let y = (rect.height - strSize.height) / 2
@@ -209,7 +225,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
             .store(in: &cancellables)
     }
     
-    // MARK: - Menu Bar Display
+    // MARK: - Menu Bar Display Helpers
     
     func getSessionBucket() -> AppState.UsageBucket? {
         return appState.usageBuckets.first(where: { $0.name == "five_hour" })
@@ -225,18 +241,52 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         else { return .labelColor }
     }
     
+    func getPrimaryDisplayValues() -> (title: String, percentage: Int, detailText: String, brandChar: String) {
+        let provider = appState.primaryProvider
+        if provider == "claude" {
+            let session = getSessionBucket()
+            let pct = session.map { Int($0.utilization) } ?? 0
+            let weekly = getWeeklyBucket()
+            let weeklyPct = weekly.map { Int($0.utilization) } ?? 0
+            return ("Claude", pct, "W:\(weeklyPct)%", "C")
+        } else if provider == "chatgpt" {
+            let bucket = appState.usageBuckets.first(where: { $0.name == "chatgpt_api" })
+            let pct = bucket.map { Int($0.utilization) } ?? 0
+            return ("ChatGPT", pct, bucket?.resetsAt ?? "$--", "G")
+        } else if provider == "gemini" {
+            let bucket = appState.usageBuckets.first(where: { $0.name == "gemini_api" })
+            let pct = bucket.map { Int($0.utilization) } ?? 0
+            return ("Gemini", pct, "\(Int(appState.geminiCurrentUsage)) req", "M")
+        } else if provider == "perplexity" {
+            let bucket = appState.usageBuckets.first(where: { $0.name == "perplexity_api" })
+            let pct = bucket.map { Int($0.utilization) } ?? 0
+            return ("Perplexity", pct, bucket?.resetsAt ?? "$--", "P")
+        } else if provider == "antigravity" {
+            let bucket = appState.usageBuckets.first(where: { $0.name == "antigravity_usage" })
+            let pct = bucket.map { Int($0.utilization) } ?? 0
+            return ("Antigravity", pct, "\(Int(appState.antigravityCurrentUsage)) q", "A")
+        } else {
+            let claudeSession = getSessionBucket()
+            let cPct = claudeSession.map { Int($0.utilization) } ?? 0
+            if let other = appState.usageBuckets.first(where: { $0.name != "five_hour" && $0.name != "seven_day" && $0.name != "extra_usage" }) {
+                return ("Hybrid", cPct, "\(other.displayName.prefix(3)):\(Int(other.utilization))%", "H")
+            } else {
+                let weekly = getWeeklyBucket()
+                let weeklyPct = weekly.map { Int($0.utilization) } ?? 0
+                return ("Hybrid", cPct, "W:\(weeklyPct)%", "H")
+            }
+        }
+    }
+    
     @objc func updateMenuBarDisplay() {
         guard let button = statusItem?.button else { return }
         
-        let session = getSessionBucket()
-        let weekly = getWeeklyBucket()
-        let sessionPct = session.map { Int($0.utilization) } ?? 0
-        let weeklyPct = weekly.map { Int($0.utilization) } ?? 0
+        let (_, pPct, pDetail, pChar) = getPrimaryDisplayValues()
         let hasData = !appState.usageBuckets.isEmpty
         
         // Icon
         if appState.showMenuBarIcon {
-            button.image = createMenuBarIcon()
+            button.image = createMenuBarIcon(withChar: pChar)
             button.imagePosition = .imageLeft
         } else {
             button.image = nil
@@ -245,7 +295,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         
         switch appState.displayMode {
         case "stacked":
-            // Two-line stacked display like Macs Fan Control
             let style = NSMutableParagraphStyle()
             style.alignment = appState.showMenuBarIcon ? .left : .center
             style.lineHeightMultiple = 0.85
@@ -259,18 +308,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                     .paragraphStyle: style,
                     .baselineOffset: -2.0
                 ]
-                button.attributedTitle = NSAttributedString(string: "S: --% \nW: --% ", attributes: attrs)
+                button.attributedTitle = NSAttributedString(string: "\(pChar): --% \n--% ", attributes: attrs)
             } else {
                 let text = NSMutableAttributedString()
-                text.append(NSAttributedString(string: "S:\(sessionPct)% \n", attributes: [
+                text.append(NSAttributedString(string: "\(pChar):\(pPct)% \n", attributes: [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .bold),
-                    .foregroundColor: colorForUtilization(Double(sessionPct)),
+                    .foregroundColor: colorForUtilization(Double(pPct)),
                     .paragraphStyle: style,
                     .baselineOffset: -1.5
                 ]))
-                text.append(NSAttributedString(string: "W:\(weeklyPct)% ", attributes: [
+                text.append(NSAttributedString(string: "\(pDetail) ", attributes: [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium),
-                    .foregroundColor: colorForUtilization(Double(weeklyPct)),
+                    .foregroundColor: NSColor.secondaryLabelColor,
                     .paragraphStyle: style,
                     .baselineOffset: -2.0
                 ]))
@@ -278,41 +327,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
             }
             
         case "compact":
-            // Single line with both: "S:22% W:15%"
             if !hasData {
-                button.attributedTitle = NSAttributedString(string: "S:--% W:--%", attributes: [
+                button.attributedTitle = NSAttributedString(string: "\(pChar):--% \(pDetail)", attributes: [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
                     .foregroundColor: NSColor.secondaryLabelColor
                 ])
             } else {
-                let maxUtil = max(Double(sessionPct), Double(weeklyPct))
-                let color = colorForUtilization(maxUtil)
-                button.attributedTitle = NSAttributedString(string: "S:\(sessionPct)% W:\(weeklyPct)%", attributes: [
+                button.attributedTitle = NSAttributedString(string: "\(pChar):\(pPct)% \(pDetail)", attributes: [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
-                    .foregroundColor: color
+                    .foregroundColor: colorForUtilization(Double(pPct))
                 ])
             }
             
         case "session":
-            // Just the session percentage
             if !hasData {
                 button.attributedTitle = NSAttributedString(string: "--%", attributes: [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
                     .foregroundColor: NSColor.secondaryLabelColor
                 ])
             } else {
-                button.attributedTitle = NSAttributedString(string: "\(sessionPct)%", attributes: [
+                button.attributedTitle = NSAttributedString(string: "\(pPct)%", attributes: [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold),
-                    .foregroundColor: colorForUtilization(Double(sessionPct))
+                    .foregroundColor: colorForUtilization(Double(pPct))
                 ])
             }
             
         case "icon_only":
-            // Just the icon, no text
             button.title = ""
             
         default:
-            button.title = "C: \(sessionPct)%"
+            button.title = "\(pChar): \(pPct)%"
         }
     }
     
@@ -321,34 +365,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
     func menuWillOpen(_ menu: NSMenu) {
         menu.removeAllItems()
         
-        // Header
-        let headerItem = NSMenuItem(title: "Claude Session Usage", action: nil, keyEquivalent: "")
+        let headerItem = NSMenuItem(title: "AI Models Usage Tracker", action: nil, keyEquivalent: "")
         headerItem.isEnabled = false
-        let headerAttrs: [NSAttributedString.Key: Any] = [
+        headerItem.attributedTitle = NSAttributedString(string: "AI Models Usage Tracker", attributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .bold),
             .foregroundColor: NSColor.labelColor
-        ]
-        headerItem.attributedTitle = NSAttributedString(string: "Claude Session Usage", attributes: headerAttrs)
+        ])
         menu.addItem(headerItem)
         
-        if !appState.usageBuckets.isEmpty {
-            let session = getSessionBucket()
-            let weekly = getWeeklyBucket()
-            let sessionPct = session.map { "\(Int($0.utilization))%" } ?? "--%"
-            let weeklyPct = weekly.map { "\(Int($0.utilization))%" } ?? "--%"
-            
-            let summaryItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-            summaryItem.isEnabled = false
-            summaryItem.attributedTitle = NSAttributedString(string: "Usage: Session \(sessionPct) • Weekly \(weeklyPct)", attributes: [
-                .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-                .foregroundColor: NSColor.secondaryLabelColor
-            ])
-            menu.addItem(summaryItem)
-        }
-        
-        menu.addItem(NSMenuItem.separator())
-        
         if appState.usageBuckets.isEmpty {
+            menu.addItem(NSMenuItem.separator())
             if let error = appState.errorMessage {
                 let errorItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
                 errorItem.isEnabled = false
@@ -363,16 +389,103 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                 menu.addItem(noDataItem)
             }
         } else {
-            // Progress bar items for each bucket
-            for bucket in appState.usageBuckets {
-                let progressView = ProgressMenuItemView(
-                    bucketName: bucket.displayName,
-                    utilization: bucket.utilization,
-                    timeRemaining: bucket.timeRemainingString
-                )
-                let menuItem = NSMenuItem()
-                menuItem.view = progressView
-                menu.addItem(menuItem)
+            func addProviderHeader(title: String, color: NSColor) {
+                menu.addItem(NSMenuItem.separator())
+                let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                header.isEnabled = false
+                header.attributedTitle = NSAttributedString(string: title, attributes: [
+                    .font: NSFont.systemFont(ofSize: 10, weight: .bold),
+                    .foregroundColor: color
+                ])
+                menu.addItem(header)
+            }
+            
+            // 1. Claude Buckets
+            let claudeBuckets = appState.usageBuckets.filter { 
+                !$0.name.hasPrefix("chatgpt") && !$0.name.hasPrefix("gemini") &&
+                !$0.name.hasPrefix("perplexity") && !$0.name.hasPrefix("antigravity")
+            }
+            if !claudeBuckets.isEmpty {
+                addProviderHeader(title: "Claude (Anthropic)", color: .systemOrange)
+                for bucket in claudeBuckets {
+                    let progressView = ProgressMenuItemView(
+                        bucketName: bucket.displayName,
+                        rawName: bucket.name,
+                        utilization: bucket.utilization,
+                        timeRemaining: bucket.timeRemainingString
+                    )
+                    let menuItem = NSMenuItem()
+                    menuItem.view = progressView
+                    menu.addItem(menuItem)
+                }
+            }
+            
+            // 2. ChatGPT Buckets
+            let chatgptBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("chatgpt") }
+            if !chatgptBuckets.isEmpty {
+                addProviderHeader(title: "ChatGPT (OpenAI)", color: NSColor(red: 16/255, green: 163/255, blue: 127/255, alpha: 1.0))
+                for bucket in chatgptBuckets {
+                    let progressView = ProgressMenuItemView(
+                        bucketName: bucket.displayName,
+                        rawName: bucket.name,
+                        utilization: bucket.utilization,
+                        timeRemaining: bucket.timeRemainingString
+                    )
+                    let menuItem = NSMenuItem()
+                    menuItem.view = progressView
+                    menu.addItem(menuItem)
+                }
+            }
+            
+            // 3. Gemini Buckets
+            let geminiBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("gemini") }
+            if !geminiBuckets.isEmpty {
+                addProviderHeader(title: "Gemini (Google)", color: NSColor(red: 26/255, green: 115/255, blue: 232/255, alpha: 1.0))
+                for bucket in geminiBuckets {
+                    let progressView = ProgressMenuItemView(
+                        bucketName: bucket.displayName,
+                        rawName: bucket.name,
+                        utilization: bucket.utilization,
+                        timeRemaining: bucket.timeRemainingString
+                    )
+                    let menuItem = NSMenuItem()
+                    menuItem.view = progressView
+                    menu.addItem(menuItem)
+                }
+            }
+            
+            // 4. Perplexity Buckets
+            let perplexityBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("perplexity") }
+            if !perplexityBuckets.isEmpty {
+                addProviderHeader(title: "Perplexity", color: NSColor(red: 25/255, green: 161/255, blue: 183/255, alpha: 1.0))
+                for bucket in perplexityBuckets {
+                    let progressView = ProgressMenuItemView(
+                        bucketName: bucket.displayName,
+                        rawName: bucket.name,
+                        utilization: bucket.utilization,
+                        timeRemaining: bucket.timeRemainingString
+                    )
+                    let menuItem = NSMenuItem()
+                    menuItem.view = progressView
+                    menu.addItem(menuItem)
+                }
+            }
+            
+            // 5. Antigravity Buckets
+            let antigravityBuckets = appState.usageBuckets.filter { $0.name.hasPrefix("antigravity") }
+            if !antigravityBuckets.isEmpty {
+                addProviderHeader(title: "Antigravity Agent", color: NSColor(red: 142/255, green: 68/255, blue: 173/255, alpha: 1.0))
+                for bucket in antigravityBuckets {
+                    let progressView = ProgressMenuItemView(
+                        bucketName: bucket.displayName,
+                        rawName: bucket.name,
+                        utilization: bucket.utilization,
+                        timeRemaining: bucket.timeRemainingString
+                    )
+                    let menuItem = NSMenuItem()
+                    menuItem.view = progressView
+                    menu.addItem(menuItem)
+                }
             }
         }
         

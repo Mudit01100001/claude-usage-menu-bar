@@ -3,6 +3,7 @@ import Combine
 import Security
 import ServiceManagement
 import WidgetKit
+import Network
 
 class AppState: ObservableObject {
     
@@ -88,6 +89,8 @@ class AppState: ObservableObject {
     // Keychain service key for storing our custom Web sessionKey securely
     private let sessionKeyKeychainKey = "com.mudit.ClaudeUsage.sessionKey"
     
+    private var localServer: LocalUsageServer?
+    
     init() {
         loadSettings()
         // Try to load cached buckets
@@ -95,6 +98,9 @@ class AppState: ObservableObject {
            let decoded = try? JSONDecoder().decode([UsageBucket].self, from: data) {
             self.usageBuckets = decoded
         }
+        
+        self.localServer = LocalUsageServer(appState: self)
+        self.localServer?.start()
     }
     
     func loadSettings() {
@@ -330,7 +336,7 @@ class AppState: ObservableObject {
     
     // MARK: - CLI API Fetching
     
-    private func fetchCliUsage(token: String, completion: (() -> Void)?) {
+    private func fetchCliUsage(token: String, isRetry: Bool = false, completion: (() -> Void)?) {
         guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
             updateStateWithError("Invalid OAuth usage URL.")
             completion?()
@@ -359,6 +365,12 @@ class AppState: ObservableObject {
                 return
             }
             
+            if httpResponse.statusCode == 401 && !isRetry {
+                print("HTTP 401 received. Attempting to scan keychain/refresh token...")
+                self.handleCliUnauthorized(attemptedToken: token, completion: completion)
+                return
+            }
+            
             guard httpResponse.statusCode == 200 else {
                 self.updateStateWithError("HTTP Error \(httpResponse.statusCode). Your Claude Code token might have expired. Try running 'claude logout' then 'claude login'.")
                 completion?()
@@ -376,6 +388,144 @@ class AppState: ObservableObject {
         }
         task.resume()
     }
+    
+    private func handleCliUnauthorized(attemptedToken: String, completion: (() -> Void)?) {
+        guard let credentialsJSONString = KeychainHelper.scanClaudeCodeCredentials() else {
+            updateStateWithError("Could not find Claude Code credentials in your Keychain to refresh.")
+            completion?()
+            return
+        }
+        
+        // Extract the latest token from keychain
+        guard let currentToken = parseAccessToken(from: credentialsJSONString) else {
+            updateStateWithError("Failed to parse access token from Keychain credentials.")
+            completion?()
+            return
+        }
+        
+        // Case 1: The keychain already contains a different token (refreshed by CLI or other process)
+        if currentToken != attemptedToken {
+            print("Detected a different token in keychain. Retrying request...")
+            fetchCliUsage(token: currentToken, isRetry: true, completion: completion)
+            return
+        }
+        
+        // Case 2: The token in keychain is the same, meaning we must refresh it ourselves in the background
+        guard let refreshToken = parseRefreshToken(from: credentialsJSONString) else {
+            updateStateWithError("Claude Code credentials do not contain a refresh token. Try running 'claude login'.")
+            completion?()
+            return
+        }
+        
+        print("Token is expired. Attempting background OAuth refresh...")
+        refreshOAuthToken(refreshToken: refreshToken, credentialsJSONString: credentialsJSONString) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let newAccessToken):
+                print("Background OAuth refresh succeeded! Retrying request...")
+                self.fetchCliUsage(token: newAccessToken, isRetry: true, completion: completion)
+            case .failure(let error):
+                print("Background OAuth refresh failed: \(error.localizedDescription)")
+                self.updateStateWithError("Session expired (HTTP 401) and background refresh failed: \(error.localizedDescription)")
+                completion?()
+            }
+        }
+    }
+    
+    private func parseRefreshToken(from jsonStr: String) -> String? {
+        guard let data = jsonStr.data(using: .utf8) else { return nil }
+        if let dict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+           let oauth = dict["claudeAiOauth"] as? [String: Any] {
+            return oauth["refreshToken"] as? String
+        }
+        return nil
+    }
+    
+    private func refreshOAuthToken(refreshToken: String, credentialsJSONString: String, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let url = URL(string: "https://api.anthropic.com/v1/oauth/token") else {
+            completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid OAuth token URL"])))
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.addValue("claude-code/2.1.34", forHTTPHeaderField: "User-Agent")
+        
+        let payload = [
+            "grant_type": "refresh_token",
+            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+            "refresh_token": refreshToken
+        ]
+        
+        let bodyString = payload.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
+        request.httpBody = bodyString.data(using: .utf8)
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completion(.failure(NSError(domain: "Invalid Response", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid server response"])))
+                return
+            }
+            
+            guard httpResponse.statusCode == 200 else {
+                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                completion(.failure(NSError(domain: "HTTP Error", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "OAuth refresh failed (HTTP \(httpResponse.statusCode)): \(body)"])))
+                return
+            }
+            
+            guard let data = data else {
+                completion(.failure(NSError(domain: "No Data", code: 0, userInfo: [NSLocalizedDescriptionKey: "Server returned no data on refresh"])))
+                return
+            }
+            
+            do {
+                guard let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                      let newAccessToken = json["access_token"] as? String,
+                      let newRefreshToken = json["refresh_token"] as? String,
+                      let expiresIn = json["expires_in"] as? Int else {
+                    completion(.failure(NSError(domain: "Parse Error", code: 0, userInfo: [NSLocalizedDescriptionKey: "Response missing token fields"])))
+                    return
+                }
+                
+                // Parse the original credentials JSON, update it, and write it back
+                guard let origData = credentialsJSONString.data(using: .utf8),
+                      var credsDict = try JSONSerialization.jsonObject(with: origData, options: [.mutableContainers]) as? [String: Any] else {
+                    completion(.failure(NSError(domain: "Parse Error", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to parse original credentials for updating"])))
+                    return
+                }
+                
+                var oauthDict = credsDict["claudeAiOauth"] as? [String: Any] ?? [String: Any]()
+                oauthDict["accessToken"] = newAccessToken
+                oauthDict["refreshToken"] = newRefreshToken
+                oauthDict["expiresAt"] = Int64(Date().timeIntervalSince1970 + Double(expiresIn)) * 1000
+                credsDict["claudeAiOauth"] = oauthDict
+                
+                let updatedData = try JSONSerialization.data(withJSONObject: credsDict, options: [.prettyPrinted])
+                guard let updatedStr = String(data: updatedData, encoding: .utf8) else {
+                    completion(.failure(NSError(domain: "Serialization Error", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to serialize updated credentials"])))
+                    return
+                }
+                
+                let writeSuccess = KeychainHelper.writeClaudeCodeCredentials(value: updatedStr)
+                if !writeSuccess {
+                    completion(.failure(NSError(domain: "Keychain Error", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to save refreshed credentials to Keychain"])))
+                    return
+                }
+                
+                completion(.success(newAccessToken))
+                
+            } catch {
+                completion(.failure(error))
+            }
+        }
+        task.resume()
+    }
+
     
     // MARK: - Helper Parsing
     
@@ -479,13 +629,6 @@ class AppState: ObservableObject {
         let weeklyUtil = weekly?.utilization ?? 0.0
         let weeklyTime = weekly?.timeRemainingString ?? "No data"
         
-        struct SharedUsageInfo: Codable {
-            let sessionUtilization: Double
-            let sessionTimeRemaining: String
-            let weeklyUtilization: Double
-            let weeklyTimeRemaining: String
-        }
-        
         let info = SharedUsageInfo(
             sessionUtilization: sessionUtil,
             sessionTimeRemaining: sessionTime,
@@ -494,6 +637,8 @@ class AppState: ObservableObject {
         )
         
         guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.Mudit01100001.claude-usage") else {
+            // Signal WidgetKit to refresh anyway (it will fetch via HTTP)
+            WidgetCenter.shared.reloadAllTimelines()
             return
         }
         
@@ -508,6 +653,123 @@ class AppState: ObservableObject {
             WidgetCenter.shared.reloadAllTimelines()
         } catch {
             print("Failed to write widget data: \(error)")
+            WidgetCenter.shared.reloadAllTimelines()
         }
     }
 }
+
+// MARK: - Local HTTP Server for Widget (Bypasses Sandboxed App Group Team ID check)
+
+struct SharedUsageInfo: Codable {
+    let sessionUtilization: Double
+    let sessionTimeRemaining: String
+    let weeklyUtilization: Double
+    let weeklyTimeRemaining: String
+}
+
+class LocalUsageServer {
+    private var listener: NWListener?
+    private unowned var appState: AppState
+    
+    init(appState: AppState) {
+        self.appState = appState
+    }
+    
+    func start(port: UInt16 = 53076) {
+        do {
+            let nwPort = NWEndpoint.Port(rawValue: port)!
+            let parameters = NWParameters.tcp
+            self.listener = try NWListener(using: parameters, on: nwPort)
+            
+            self.listener?.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    print("Local usage server ready on port \(port)")
+                case .failed(let error):
+                    print("Local usage server failed: \(error)")
+                default:
+                    break
+                }
+            }
+            
+            self.listener?.newConnectionHandler = { [weak self] connection in
+                self?.handleConnection(connection)
+            }
+            
+            self.listener?.start(queue: .global(qos: .background))
+        } catch {
+            print("Failed to start local usage server: \(error)")
+        }
+    }
+    
+    func stop() {
+        self.listener?.cancel()
+        self.listener = nil
+    }
+    
+    private func handleConnection(_ connection: NWConnection) {
+        connection.start(queue: .global(qos: .background))
+        
+        // Read the request data
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) { [weak self] data, context, isComplete, error in
+            guard let self = self else { return }
+            if let error = error {
+                print("Connection receive error: \(error)")
+                connection.cancel()
+                return
+            }
+            
+            if let data = data, let reqStr = String(data: data, encoding: .utf8), reqStr.contains("GET") {
+                self.sendResponse(connection)
+            } else {
+                connection.cancel()
+            }
+        }
+    }
+    
+    private func sendResponse(_ connection: NWConnection) {
+        let session = self.appState.usageBuckets.first(where: { $0.name == "five_hour" })
+        let weekly = self.appState.usageBuckets.first(where: { $0.name == "seven_day" })
+        
+        let sessionUtil = session?.utilization ?? 0.0
+        let sessionTime = session?.timeRemainingString ?? "No data"
+        let weeklyUtil = weekly?.utilization ?? 0.0
+        let weeklyTime = weekly?.timeRemainingString ?? "No data"
+        
+        let info = SharedUsageInfo(
+            sessionUtilization: sessionUtil,
+            sessionTimeRemaining: sessionTime,
+            weeklyUtilization: weeklyUtil,
+            weeklyTimeRemaining: weeklyTime
+        )
+        
+        guard let jsonData = try? JSONEncoder().encode(info),
+              let jsonStr = String(data: jsonData, encoding: .utf8) else {
+            connection.cancel()
+            return
+        }
+        
+        let httpResponse = """
+        HTTP/1.1 200 OK\r
+        Content-Type: application/json\r
+        Content-Length: \(jsonData.count)\r
+        Connection: close\r
+        Access-Control-Allow-Origin: *\r
+        \r
+        \(jsonStr)
+        """
+        
+        guard let responseData = httpResponse.data(using: .utf8) else {
+            connection.cancel()
+            return
+        }
+        
+        connection.send(content: responseData, completion: .contentProcessed({ error in
+            if let error = error {
+                print("Connection send error: \(error)")
+            }
+            connection.cancel()
+        }))
+    }
+}
+

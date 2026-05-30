@@ -51,18 +51,62 @@ struct Provider: TimelineProvider {
     }
     
     func getSnapshot(in context: Context, completion: @escaping (ClaudeUsageEntry) -> ()) {
-        completion(loadEntry())
+        loadEntry { entry in
+            completion(entry)
+        }
     }
     
     func getTimeline(in context: Context, completion: @escaping (Timeline<ClaudeUsageEntry>) -> ()) {
-        let entry = loadEntry()
-        // Refresh every 5 minutes dynamically as backup, but the main app will force reload immediately on fetch
-        let nextUpdate = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date()
-        let timeline = Timeline(entries: [entry], policy: .after(nextUpdate))
-        completion(timeline)
+        loadEntry { entry in
+            let nextUpdate = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date()
+            let timeline = Timeline(entries: [entry], policy: .after(nextUpdate))
+            completion(timeline)
+        }
     }
     
-    private func loadEntry() -> ClaudeUsageEntry {
+    private func loadEntry(completion: @escaping (ClaudeUsageEntry) -> Void) {
+        guard let url = URL(string: "http://127.0.0.1:53076/usage") else {
+            completion(placeholderEntry())
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 1.5
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("Failed to fetch widget data via HTTP: \(error)")
+                let fallback = self.loadEntryFromSharedContainer()
+                completion(fallback)
+                return
+            }
+            
+            guard let data = data else {
+                let fallback = self.loadEntryFromSharedContainer()
+                completion(fallback)
+                return
+            }
+            
+            do {
+                let info = try JSONDecoder().decode(SharedUsageInfo.self, from: data)
+                let entry = ClaudeUsageEntry(
+                    date: Date(),
+                    sessionUtilization: info.sessionUtilization,
+                    sessionTimeRemaining: info.sessionTimeRemaining,
+                    weeklyUtilization: info.weeklyUtilization,
+                    weeklyTimeRemaining: info.weeklyTimeRemaining
+                )
+                completion(entry)
+            } catch {
+                print("Failed to decode HTTP widget data: \(error)")
+                let fallback = self.loadEntryFromSharedContainer()
+                completion(fallback)
+            }
+        }
+        task.resume()
+    }
+    
+    private func loadEntryFromSharedContainer() -> ClaudeUsageEntry {
         guard let containerURL = getSharedContainerURL() else {
             return placeholderEntry()
         }

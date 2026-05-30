@@ -124,5 +124,54 @@ class KeychainHelper {
         
         return nil
     }
+    
+    // Write Claude Code credentials to Keychain and/or file
+    class func writeClaudeCodeCredentials(value: String) -> Bool {
+        var success = false
+        
+        if writeCredentialsViaCLI(value: value) {
+            success = true
+        }
+        
+        if writeCredentialsToFile(value: value) {
+            success = true
+        }
+        
+        return success
+    }
+    
+    private class func writeCredentialsViaCLI(value: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        let username = NSUserName()
+        process.arguments = ["add-generic-password", "-a", username, "-s", "Claude Code-credentials", "-w", value, "-U"]
+        
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+    
+    private class func writeCredentialsToFile(value: String) -> Bool {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let credentialsPath = homeDir.appendingPathComponent(".claude/.credentials.json")
+        
+        if FileManager.default.fileExists(atPath: credentialsPath.path) {
+            do {
+                try value.write(to: credentialsPath, atomically: true, encoding: .utf8)
+                return true
+            } catch {
+                // Silently fail
+            }
+        }
+        return false
+    }
 }
+
 

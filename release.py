@@ -13,6 +13,21 @@ REPO_OWNER = "Mudit01100001"
 REPO_NAME = "claude-usage-menu-bar"
 CHANGELOG_PATH = "CHANGELOG.md"
 
+def load_env():
+    """Load variables from .env file into os.environ if it exists."""
+    if os.path.exists(".env"):
+        print("Loading environment variables from .env...")
+        with open(".env", "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("=", 1)
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    val = parts[1].strip().strip('"').strip("'")
+                    os.environ[key] = val
+
 def run_command(cmd, shell=False):
     """Helper to run a shell command and return output."""
     try:
@@ -260,6 +275,7 @@ def publish_github_release(tag, title, body):
         return False
 
 def main():
+    load_env()
     print("=== Claude Usage macOS Release Automation ===")
     
     # 1. Fetch tags and commits
@@ -314,6 +330,13 @@ def main():
     run_command(["git", "add", CHANGELOG_PATH])
     run_command(["git", "commit", "-m", f"chore: update CHANGELOG.md for release {tag}"])
     
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        # Configure remote URL with token for authenticated push without prompts
+        remote_url = f"https://{token}@github.com/{REPO_OWNER}/{REPO_NAME}.git"
+        print("Configuring git remote URL with OAuth token...")
+        run_command(["git", "remote", "set-url", "origin", remote_url])
+        
     current_branch = run_command(["git", "branch", "--show-current"])
     print(f"Pushing commits to origin/{current_branch}...")
     run_command(["git", "push", "origin", current_branch])

@@ -129,11 +129,27 @@ No — click **"Always Allow"** on the first macOS prompt to permanently whiteli
 No — the app reads the stored OAuth token. Your terminal can be fully closed.
 
 **The widget doesn't appear in the Widget Gallery.**  
-Make sure you launched the app at least once after building, then try:
-```bash
-pluginkit -v -a "ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex"
-pkill -f chronod
-```
+
+Under ad-hoc code signing (default in `build.sh` via `codesign -s -`), macOS enforces strict security restrictions on WidgetKit extensions:
+1. **App Groups & Sandboxing**: Without a valid Apple Developer Account Team ID, macOS rejects App Group containers (`com.apple.security.application-groups`). The app has been updated to bypass this by running a lightweight local HTTP server (`127.0.0.1:53076`) in the menu bar app, which the widget queries directly.
+2. **Widget Gallery Visibility**: Even with the App Group bypass, macOS system daemon `chronod` frequently ignores or fails to load ad-hoc signed app extensions in the Widget Gallery.
+
+**Known Workarounds / Diagnostics:**
+- Check system logs for registration errors:
+  ```bash
+  log show --predicate 'sender == "chronod" || process == "chronod"' --last 10m
+  ```
+- Force re-register and restart `chronod`:
+  ```bash
+  # Unregister and re-register
+  pluginkit -r /Applications/ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex
+  pluginkit -a /Applications/ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex
+  pluginkit -e use -i com.mudit.ClaudeUsage.Widget
+  
+  # Restart widget daemon
+  pkill -f chronod
+  ```
+- **Recommended Solution**: Open `build.sh`, change `-s -` to your own Apple Developer Certificate Name (e.g., `"Apple Development: your@email.com"`), restore App Group entitlements with your Team ID in the entitlements files, and rebuild. Proper developer signatures solve all Widget Gallery registration issues.
 
 **Refresh fails / data not updating.**  
 Open Settings → Connection. For web sessions, the `sessionKey` cookie expires after a few weeks — grab a fresh one from your browser. For CLI, run `claude logout && claude login`.

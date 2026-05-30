@@ -68,8 +68,14 @@ xattr -cr ClaudeUsage.app
 echo "Signing Widget extension..."
 codesign --force --sign - --entitlements widget.entitlements ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex
 
+# Clean up resource forks/metadata on the outer directories created during the widget signing process
+# (Do NOT use -r to prevent invalidating the inner widget's signature)
+echo "Cleaning signed metadata..."
+xattr -c ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex 2>/dev/null || true
+xattr -c ClaudeUsage.app 2>/dev/null || true
+
 echo "Signing main App bundle..."
-codesign --force --sign - --entitlements parent.entitlements ClaudeUsage.app
+codesign --force --sign - ClaudeUsage.app
 
 echo "=== Build Complete! Created ClaudeUsage.app ==="
 echo "You can launch the app with: open ClaudeUsage.app"

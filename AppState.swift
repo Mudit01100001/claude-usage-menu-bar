@@ -12,7 +12,10 @@ class AppState: ObservableObject {
         let name: String
         let utilization: Double
         let resetsAt: String
-        
+        // Where this number came from. Drives the honesty tag in the UI.
+        // live_subscription | live_local | live_api_cost | manual | extension
+        var source: String = "live"
+
         var displayName: String {
             switch name {
             case "five_hour":
@@ -113,6 +116,7 @@ class AppState: ObservableObject {
     @Published var errorMessage: String? = nil
     @Published var usageBuckets: [UsageBucket] = []
     @Published var orgUuid: String = "" // Cached org uuid
+    @Published var lastExtensionIngest: Date? = nil // Last time the browser extension POSTed usage
     
     // Menu Bar Display Settings
     @Published var displayMode: String = "stacked" // "stacked", "compact", "session", "icon_only"
@@ -125,7 +129,9 @@ class AppState: ObservableObject {
     private var geminiBuckets: [UsageBucket] = []
     private var perplexityBuckets: [UsageBucket] = []
     private var antigravityBuckets: [UsageBucket] = []
-    
+    // Usage pushed in by the browser extension, keyed by provider id.
+    private var extensionBuckets: [String: [UsageBucket]] = [:]
+
     // Keychain service keys for storing credentials securely
     private let sessionKeyKeychainKey = "com.mudit.ClaudeUsage.sessionKey"
     private let chatgptKeyKeychainKey = "com.mudit.ClaudeUsage.openaiKey"
@@ -374,13 +380,23 @@ class AppState: ObservableObject {
     // MARK: - Claude Fetch & Parse
     
     private func refreshClaudeUsage(completion: @escaping () -> Void) {
+        // Always assign claudeBuckets and call completion() on the main thread.
+        // URLSession callbacks fire on a background queue; consolidateBuckets()
+        // reads claudeBuckets on main (via group.notify(queue:.main)), so writing
+        // off-main is a data race that can intermittently blank out Claude.
+        func finish(_ buckets: [UsageBucket]) {
+            DispatchQueue.main.async {
+                self.claudeBuckets = buckets
+                completion()
+            }
+        }
+
         if selectedMethod == "web" {
             guard !sessionKey.isEmpty else {
-                self.claudeBuckets = []
-                completion()
+                finish([])
                 return
             }
-            
+
             if self.orgUuid.isEmpty {
                 fetchWebOrgUuid(sessionKey: sessionKey) { [weak self] result in
                     guard let self = self else { completion(); return }
@@ -391,32 +407,35 @@ class AppState: ObservableObject {
                             self.saveSettings()
                         }
                         self.fetchClaudeWebUsageDetails(sessionKey: sessionKey, orgUuid: uuid) { buckets in
-                            self.claudeBuckets = buckets
-                            completion()
+                            finish(buckets)
                         }
                     case .failure(let error):
                         print("Failed to get organization ID: \(error.localizedDescription)")
-                        self.claudeBuckets = []
-                        completion()
+                        let nsError = error as NSError
+                        let msg = nsError.code == NSURLErrorTimedOut
+                            ? "Claude request timed out — will retry on next refresh."
+                            : "Couldn't reach Claude (org lookup): \(error.localizedDescription)"
+                        DispatchQueue.main.async { self.errorMessage = msg }
+                        finish([])
                     }
                 }
             } else {
                 fetchClaudeWebUsageDetails(sessionKey: sessionKey, orgUuid: self.orgUuid) { buckets in
-                    self.claudeBuckets = buckets
-                    completion()
+                    finish(buckets)
                 }
             }
         } else {
             guard let credentialsJSONString = KeychainHelper.scanClaudeCodeCredentials(),
                   let token = parseAccessToken(from: credentialsJSONString) else {
-                self.claudeBuckets = []
-                completion()
+                DispatchQueue.main.async {
+                    self.errorMessage = "No Claude Code credentials found in Keychain. Run `claude login`, then Scan again in Settings."
+                }
+                finish([])
                 return
             }
-            
+
             fetchClaudeCliUsage(token: token) { buckets in
-                self.claudeBuckets = buckets
-                completion()
+                finish(buckets)
             }
         }
     }
@@ -429,7 +448,7 @@ class AppState: ObservableObject {
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = 5.0
+        request.timeoutInterval = 15.0
         request.addValue("sessionKey=\(sessionKey)", forHTTPHeaderField: "Cookie")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
@@ -480,7 +499,7 @@ class AppState: ObservableObject {
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = 5.0
+        request.timeoutInterval = 15.0
         request.addValue("sessionKey=\(sessionKey)", forHTTPHeaderField: "Cookie")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
@@ -489,11 +508,37 @@ class AppState: ObservableObject {
             guard let self = self else { completion([]); return }
             if let error = error {
                 print("Claude web details error: \(error.localizedDescription)")
+                let isTimeout = (error as NSError).code == NSURLErrorTimedOut
+                DispatchQueue.main.async {
+                    self.errorMessage = isTimeout
+                        ? "Claude request timed out — will retry on next refresh."
+                        : "Claude web error: \(error.localizedDescription)"
+                }
                 completion([])
                 return
             }
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                    DispatchQueue.main.async {
+                        self.errorMessage = "Claude session key expired — paste a fresh one in Settings → Connection."
+                    }
+                    completion([])
+                    return
+                }
+                guard httpResponse.statusCode == 200 else {
+                    DispatchQueue.main.async {
+                        self.errorMessage = "Claude server returned \(httpResponse.statusCode)."
+                    }
+                    completion([])
+                    return
+                }
+            }
             guard let data = data else { completion([]); return }
             let buckets = self.parseClaudeBuckets(data: data)
+            // Clear any stale error once we have a good fetch.
+            if !buckets.isEmpty {
+                DispatchQueue.main.async { self.errorMessage = nil }
+            }
             completion(buckets)
         }
         task.resume()
@@ -507,7 +552,7 @@ class AppState: ObservableObject {
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = 5.0
+        request.timeoutInterval = 15.0
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -602,7 +647,7 @@ class AppState: ObservableObject {
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 5.0
+        request.timeoutInterval = 15.0
         request.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.addValue("claude-code/2.1.34", forHTTPHeaderField: "User-Agent")
         
@@ -698,7 +743,8 @@ class AppState: ObservableObject {
                         tempBuckets.append(UsageBucket(
                             name: key,
                             utilization: utilization,
-                            resetsAt: "\(usedDollars)/\(limitDollars)"
+                            resetsAt: "\(usedDollars)/\(limitDollars)",
+                            source: "live_subscription"
                         ))
                     }
                 } else {
@@ -707,7 +753,8 @@ class AppState: ObservableObject {
                         tempBuckets.append(UsageBucket(
                             name: key,
                             utilization: utilization,
-                            resetsAt: resetsAtStr
+                            resetsAt: resetsAtStr,
+                            source: "live_subscription"
                         ))
                     }
                 }
@@ -727,106 +774,103 @@ class AppState: ObservableObject {
     // MARK: - ChatGPT Fetch
     
     private func refreshChatGPTUsage(completion: @escaping () -> Void) {
-        if chatgptMethod == "simulated" {
-            let util = min((chatgptCurrentUsage / chatgptMonthlyLimit) * 100.0, 100.0)
-            let resetsStr = String(format: "$%.2f / $%.2f monthly", chatgptCurrentUsage, chatgptMonthlyLimit)
-            self.chatgptBuckets = [
-                UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr)
-            ]
-            completion()
-        } else {
-            guard !chatgptApiKey.isEmpty else {
-                let resetsStr = "API Key missing"
-                self.chatgptBuckets = [
-                    UsageBucket(name: "chatgpt_api", utilization: 0.0, resetsAt: resetsStr)
-                ]
+        // IMPORTANT: there is no public API for ChatGPT Plus/Pro *subscription* usage.
+        // "api_key" mode reports your OpenAI *developer API* spend ($) via the Costs API,
+        // which requires an Admin key (sk-admin-...). "simulated" is a manual estimate.
+        // Neither reflects ChatGPT subscription message caps.
+        func finish(_ buckets: [UsageBucket]) {
+            DispatchQueue.main.async {
+                self.chatgptBuckets = buckets
                 completion()
-                return
             }
-            
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            let todayStr = formatter.string(from: Date())
-            
-            guard let url = URL(string: "https://api.openai.com/v1/usage?date=\(todayStr)") else {
-                completion()
-                return
-            }
-            
-            var request = URLRequest(url: url)
-            request.httpMethod = "GET"
-            request.timeoutInterval = 5.0
-            request.addValue("Bearer \(chatgptApiKey)", forHTTPHeaderField: "Authorization")
-            
-            let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-                guard let self = self else { completion(); return }
-                if let error = error {
-                    print("OpenAI fetch error: \(error.localizedDescription)")
-                    let util = min((self.chatgptCurrentUsage / self.chatgptMonthlyLimit) * 100.0, 100.0)
-                    let resetsStr = String(format: "$%.2f / $%.2f (Offline)", self.chatgptCurrentUsage, self.chatgptMonthlyLimit)
-                    self.chatgptBuckets = [
-                        UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr)
-                    ]
-                    completion()
-                    return
-                }
-                
-                guard let data = data else {
-                    completion()
-                    return
-                }
-                
-                struct OpenAIUsageResponse: Codable {
-                    struct UsageItem: Codable {
-                        let n_context_tokens: Double?
-                        let n_generated_tokens: Double?
-                        let n_requests: Int?
-                    }
-                    let data: [UsageItem]?
-                }
-                
-                do {
-                    let decoded = try JSONDecoder().decode(OpenAIUsageResponse.self, from: data)
-                    var dailyCost = 0.0
-                    if let items = decoded.data {
-                        for item in items {
-                            let promptT = item.n_context_tokens ?? 0.0
-                            let compT = item.n_generated_tokens ?? 0.0
-                            dailyCost += (promptT * 0.0000025) + (compT * 0.000010)
-                        }
-                    }
-                    
-                    DispatchQueue.main.async {
-                        self.chatgptCurrentUsage = dailyCost
-                        self.saveSettings()
-                    }
-                    
-                    let util = min((dailyCost / self.chatgptMonthlyLimit) * 100.0, 100.0)
-                    let resetsStr = String(format: "$%.4f / $%.2f daily cost", dailyCost, self.chatgptMonthlyLimit)
-                    self.chatgptBuckets = [
-                        UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr)
-                    ]
-                    completion()
-                } catch {
-                    let util = min((self.chatgptCurrentUsage / self.chatgptMonthlyLimit) * 100.0, 100.0)
-                    let resetsStr = String(format: "$%.2f / $%.2f (Parse error)", self.chatgptCurrentUsage, self.chatgptMonthlyLimit)
-                    self.chatgptBuckets = [
-                        UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr)
-                    ]
-                    completion()
-                }
-            }
-            task.resume()
         }
+
+        if chatgptMethod == "simulated" {
+            let util = min((chatgptCurrentUsage / max(chatgptMonthlyLimit, 1)) * 100.0, 100.0)
+            let resetsStr = String(format: "$%.2f / $%.2f (manual)", chatgptCurrentUsage, chatgptMonthlyLimit)
+            finish([UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr, source: "manual")])
+            return
+        }
+
+        guard !chatgptApiKey.isEmpty else {
+            finish([UsageBucket(name: "chatgpt_api", utilization: 0.0, resetsAt: "Admin API key missing", source: "manual")])
+            return
+        }
+
+        // OpenAI Costs API — developer API spend over the trailing ~30 days.
+        let startTime = Int(Date().timeIntervalSince1970) - (30 * 24 * 3600)
+        guard let url = URL(string: "https://api.openai.com/v1/organization/costs?start_time=\(startTime)&limit=31") else {
+            finish([])
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15.0
+        request.addValue("Bearer \(chatgptApiKey)", forHTTPHeaderField: "Authorization")
+
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { completion(); return }
+
+            if let error = error {
+                print("OpenAI Costs fetch error: \(error.localizedDescription)")
+                let util = min((self.chatgptCurrentUsage / max(self.chatgptMonthlyLimit, 1)) * 100.0, 100.0)
+                let resetsStr = String(format: "$%.2f / $%.2f (offline)", self.chatgptCurrentUsage, self.chatgptMonthlyLimit)
+                finish([UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr, source: "manual")])
+                return
+            }
+
+            if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+                finish([UsageBucket(name: "chatgpt_api", utilization: 0.0, resetsAt: "Needs an Admin key (sk-admin-…)", source: "manual")])
+                return
+            }
+
+            guard let data = data else { finish([]); return }
+
+            struct CostsResponse: Codable {
+                struct Bucket: Codable {
+                    struct Result: Codable {
+                        struct Amount: Codable { let value: Double? }
+                        let amount: Amount?
+                    }
+                    let results: [Result]?
+                }
+                let data: [Bucket]?
+            }
+
+            do {
+                let decoded = try JSONDecoder().decode(CostsResponse.self, from: data)
+                var totalCost = 0.0
+                for bucket in decoded.data ?? [] {
+                    for result in bucket.results ?? [] {
+                        totalCost += result.amount?.value ?? 0.0
+                    }
+                }
+                DispatchQueue.main.async {
+                    self.chatgptCurrentUsage = totalCost
+                    self.saveSettings()
+                }
+                let util = min((totalCost / max(self.chatgptMonthlyLimit, 1)) * 100.0, 100.0)
+                let resetsStr = String(format: "$%.2f / $%.2f API spend (30d)", totalCost, self.chatgptMonthlyLimit)
+                finish([UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr, source: "live_api_cost")])
+            } catch {
+                let util = min((self.chatgptCurrentUsage / max(self.chatgptMonthlyLimit, 1)) * 100.0, 100.0)
+                let resetsStr = String(format: "$%.2f / $%.2f (parse error)", self.chatgptCurrentUsage, self.chatgptMonthlyLimit)
+                finish([UsageBucket(name: "chatgpt_api", utilization: util, resetsAt: resetsStr, source: "manual")])
+            }
+        }
+        task.resume()
     }
     
     // MARK: - Gemini Fetch
     
     private func refreshGeminiUsage(completion: @escaping () -> Void) {
-        let util = min((geminiCurrentUsage / geminiDailyLimit) * 100.0, 100.0)
-        let resetsStr = String(format: "%d / %d daily requests", Int(geminiCurrentUsage), Int(geminiDailyLimit))
+        // Google does not expose consumer Gemini (Advanced/free-tier) usage via API,
+        // so this is a manual estimate the user maintains in Settings.
+        let util = min((geminiCurrentUsage / max(geminiDailyLimit, 1)) * 100.0, 100.0)
+        let resetsStr = String(format: "%d / %d requests (manual)", Int(geminiCurrentUsage), Int(geminiDailyLimit))
         self.geminiBuckets = [
-            UsageBucket(name: "gemini_api", utilization: util, resetsAt: resetsStr)
+            UsageBucket(name: "gemini_api", utilization: util, resetsAt: resetsStr, source: "manual")
         ]
         completion()
     }
@@ -834,10 +878,12 @@ class AppState: ObservableObject {
     // MARK: - Perplexity Fetch
     
     private func refreshPerplexityUsage(completion: @escaping () -> Void) {
-        let util = min((perplexityCurrentUsage / perplexityLimit) * 100.0, 100.0)
-        let resetsStr = String(format: "$%.2f / $%.2f credits", perplexityCurrentUsage, perplexityLimit)
+        // Perplexity Pro usage and API credit balance are dashboard-only (no public
+        // usage endpoint), so this is a manual estimate the user maintains in Settings.
+        let util = min((perplexityCurrentUsage / max(perplexityLimit, 1)) * 100.0, 100.0)
+        let resetsStr = String(format: "$%.2f / $%.2f credits (manual)", perplexityCurrentUsage, perplexityLimit)
         self.perplexityBuckets = [
-            UsageBucket(name: "perplexity_api", utilization: util, resetsAt: resetsStr)
+            UsageBucket(name: "perplexity_api", utilization: util, resetsAt: resetsStr, source: "manual")
         ]
         completion()
     }
@@ -846,10 +892,11 @@ class AppState: ObservableObject {
     
     private func refreshAntigravityUsage(completion: @escaping () -> Void) {
         if antigravityMethod == "simulated" {
-            let util = min((antigravityCurrentUsage / antigravityLimit) * 100.0, 100.0)
-            let resetsStr = String(format: "%d / %d queries", Int(antigravityCurrentUsage), Int(antigravityLimit))
+            // Manual estimate (live local tracking not selected).
+            let util = min((antigravityCurrentUsage / max(antigravityLimit, 1)) * 100.0, 100.0)
+            let resetsStr = String(format: "%d queries · target %d (manual)", Int(antigravityCurrentUsage), Int(antigravityLimit))
             self.antigravityBuckets = [
-                UsageBucket(name: "antigravity_usage", utilization: util, resetsAt: resetsStr)
+                UsageBucket(name: "antigravity_usage", utilization: util, resetsAt: resetsStr, source: "manual")
             ]
             completion()
         } else {
@@ -891,11 +938,13 @@ class AppState: ObservableObject {
                 DispatchQueue.main.async {
                     self.antigravityCurrentUsage = queries
                     self.saveSettings()
-                    
-                    let util = min((queries / self.antigravityLimit) * 100.0, 100.0)
-                    let resetsStr = String(format: "%d / %d queries (%d convos)", Int(queries), Int(self.antigravityLimit), convoCount)
+
+                    // Antigravity has no vendor-enforced cap, so antigravityLimit is a
+                    // user-set TARGET for the progress bar, not a real limit.
+                    let util = min((queries / max(self.antigravityLimit, 1)) * 100.0, 100.0)
+                    let resetsStr = String(format: "%d queries · target %d (%d convos)", Int(queries), Int(self.antigravityLimit), convoCount)
                     self.antigravityBuckets = [
-                        UsageBucket(name: "antigravity_usage", utilization: util, resetsAt: resetsStr)
+                        UsageBucket(name: "antigravity_usage", utilization: util, resetsAt: resetsStr, source: "live_local")
                     ]
                     completion()
                 }
@@ -903,30 +952,54 @@ class AppState: ObservableObject {
         }
     }
     
+    // MARK: - Browser-extension ingest
+
+    /// Called by LocalUsageServer when the browser extension POSTs usage for a provider.
+    func ingestExtensionUsage(provider: String, buckets: [UsageBucket]) {
+        DispatchQueue.main.async {
+            let tagged = buckets.map {
+                UsageBucket(name: $0.name, utilization: $0.utilization, resetsAt: $0.resetsAt, source: "extension")
+            }
+            self.extensionBuckets[provider] = tagged
+            self.lastExtensionIngest = Date()
+            self.consolidateBuckets()
+            NotificationCenter.default.post(name: Notification.Name("UpdateMenuBarText"), object: nil)
+        }
+    }
+
     // MARK: - State Consolidation
-    
+
+    /// Prefer real direct data; fall back to extension-pushed data; finally manual direct data.
+    private func resolvedBuckets(direct: [UsageBucket], provider: String) -> [UsageBucket] {
+        let ext = extensionBuckets[provider] ?? []
+        let directIsReal = !direct.isEmpty && !direct.allSatisfy { $0.source == "manual" }
+        if directIsReal { return direct }
+        if !ext.isEmpty { return ext }
+        return direct
+    }
+
     private func consolidateBuckets() {
         var allBuckets: [UsageBucket] = []
-        
+
         for provider in providerOrder {
             switch provider {
             case "claude":
-                allBuckets.append(contentsOf: claudeBuckets)
+                allBuckets.append(contentsOf: resolvedBuckets(direct: claudeBuckets, provider: "claude"))
             case "chatgpt":
                 if chatgptEnabled {
-                    allBuckets.append(contentsOf: chatgptBuckets)
+                    allBuckets.append(contentsOf: resolvedBuckets(direct: chatgptBuckets, provider: "chatgpt"))
                 }
             case "gemini":
                 if geminiEnabled {
-                    allBuckets.append(contentsOf: geminiBuckets)
+                    allBuckets.append(contentsOf: resolvedBuckets(direct: geminiBuckets, provider: "gemini"))
                 }
             case "perplexity":
                 if perplexityEnabled {
-                    allBuckets.append(contentsOf: perplexityBuckets)
+                    allBuckets.append(contentsOf: resolvedBuckets(direct: perplexityBuckets, provider: "perplexity"))
                 }
             case "antigravity":
                 if antigravityEnabled {
-                    allBuckets.append(contentsOf: antigravityBuckets)
+                    allBuckets.append(contentsOf: resolvedBuckets(direct: antigravityBuckets, provider: "antigravity"))
                 }
             default:
                 break
@@ -1069,6 +1142,20 @@ class AppState: ObservableObject {
     }
 }
 
+// MARK: - UsageBucket Codable (tolerant of older cached data written before `source` existed)
+
+extension AppState.UsageBucket {
+    enum CodingKeys: String, CodingKey { case name, utilization, resetsAt, source }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.utilization = try c.decode(Double.self, forKey: .utilization)
+        self.resetsAt = try c.decode(String.self, forKey: .resetsAt)
+        self.source = try c.decodeIfPresent(String.self, forKey: .source) ?? "live"
+    }
+}
+
 // MARK: - Local HTTP Server for Widget (Bypasses Sandboxed App Group Team ID check)
 
 struct SharedUsageInfo: Codable {
@@ -1120,52 +1207,119 @@ class LocalUsageServer {
     
     private func handleConnection(_ connection: NWConnection) {
         connection.start(queue: .global(qos: .background))
-        
-        // Read the request data
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) { [weak self] data, context, isComplete, error in
-            guard let self = self else { return }
+        receiveRequest(connection, accumulated: Data())
+    }
+
+    // Accumulate until headers are complete and the declared body has arrived.
+    // Payloads here are tiny localhost JSON, but TCP can still fragment.
+    private func receiveRequest(_ connection: NWConnection, accumulated: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+            guard let self = self else { connection.cancel(); return }
             if let error = error {
                 print("Connection receive error: \(error)")
                 connection.cancel()
                 return
             }
-            
-            if let data = data, let reqStr = String(data: data, encoding: .utf8), reqStr.contains("GET") {
-                self.sendResponse(connection)
-            } else {
-                connection.cancel()
+
+            var buffer = accumulated
+            if let data = data { buffer.append(data) }
+
+            guard let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) else {
+                if isComplete { connection.cancel() } else { self.receiveRequest(connection, accumulated: buffer) }
+                return
             }
+
+            let headerData = buffer.subdata(in: buffer.startIndex..<headerEnd.lowerBound)
+            let headerStr = String(data: headerData, encoding: .utf8) ?? ""
+            let lines = headerStr.components(separatedBy: "\r\n")
+            let requestLine = lines.first ?? ""
+            let parts = requestLine.components(separatedBy: " ")
+            let method = parts.first ?? "GET"
+            let path = parts.count > 1 ? parts[1] : "/"
+
+            var contentLength = 0
+            for line in lines where line.lowercased().hasPrefix("content-length:") {
+                contentLength = Int(line.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) ?? 0
+            }
+
+            let body = buffer.subdata(in: headerEnd.upperBound..<buffer.endIndex)
+            if body.count < contentLength && !isComplete {
+                self.receiveRequest(connection, accumulated: buffer)
+                return
+            }
+
+            self.route(connection, method: method, path: path, body: body)
         }
     }
-    
-    private func sendResponse(_ connection: NWConnection) {
-        let info = self.appState.computeSharedUsageInfo()
-        
+
+    private func route(_ connection: NWConnection, method: String, path: String, body: Data) {
+        switch method {
+        case "OPTIONS":
+            sendPreflight(connection)
+        case "POST" where path.hasPrefix("/ingest"):
+            handleIngest(connection, body: body)
+        default:
+            sendUsage(connection) // GET — widget data (original behavior)
+        }
+    }
+
+    private func handleIngest(_ connection: NWConnection, body: Data) {
+        struct IngestPayload: Codable {
+            struct InBucket: Codable {
+                let name: String
+                let utilization: Double
+                let resetsAt: String
+            }
+            let provider: String
+            let buckets: [InBucket]
+        }
+
+        var ok = false
+        if let payload = try? JSONDecoder().decode(IngestPayload.self, from: body), !payload.provider.isEmpty {
+            let buckets = payload.buckets.map {
+                AppState.UsageBucket(name: $0.name, utilization: $0.utilization, resetsAt: $0.resetsAt)
+            }
+            appState.ingestExtensionUsage(provider: payload.provider, buckets: buckets)
+            ok = true
+        }
+        sendJSON(connection, status: ok ? "200 OK" : "400 Bad Request", json: ok ? "{\"ok\":true}" : "{\"ok\":false}")
+    }
+
+    private func sendUsage(_ connection: NWConnection) {
+        let info = appState.computeSharedUsageInfo()
         guard let jsonData = try? JSONEncoder().encode(info),
               let jsonStr = String(data: jsonData, encoding: .utf8) else {
             connection.cancel()
             return
         }
-        
-        let httpResponse = """
-        HTTP/1.1 200 OK\r
-        Content-Type: application/json\r
-        Content-Length: \(jsonData.count)\r
-        Connection: close\r
-        Access-Control-Allow-Origin: *\r
-        \r
-        \(jsonStr)
-        """
-        
-        guard let responseData = httpResponse.data(using: .utf8) else {
-            connection.cancel()
-            return
-        }
-        
-        connection.send(content: responseData, completion: .contentProcessed({ error in
-            if let error = error {
-                print("Connection send error: \(error)")
-            }
+        sendJSON(connection, status: "200 OK", json: jsonStr)
+    }
+
+    private func sendPreflight(_ connection: NWConnection) {
+        let response = "HTTP/1.1 204 No Content\r\n"
+            + "Access-Control-Allow-Origin: *\r\n"
+            + "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            + "Access-Control-Allow-Headers: Content-Type\r\n"
+            + "Content-Length: 0\r\n"
+            + "Connection: close\r\n\r\n"
+        write(connection, response)
+    }
+
+    private func sendJSON(_ connection: NWConnection, status: String, json: String) {
+        let jsonData = Data(json.utf8)
+        let response = "HTTP/1.1 \(status)\r\n"
+            + "Content-Type: application/json\r\n"
+            + "Content-Length: \(jsonData.count)\r\n"
+            + "Access-Control-Allow-Origin: *\r\n"
+            + "Connection: close\r\n\r\n"
+            + json
+        write(connection, response)
+    }
+
+    private func write(_ connection: NWConnection, _ response: String) {
+        guard let data = response.data(using: .utf8) else { connection.cancel(); return }
+        connection.send(content: data, completion: .contentProcessed({ error in
+            if let error = error { print("Connection send error: \(error)") }
             connection.cancel()
         }))
     }

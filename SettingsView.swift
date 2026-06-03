@@ -376,8 +376,6 @@ struct ConnectionTabView: View {
     @State private var activeProviderTab: String = "claude"
     @State private var showClaudeSessionKey: Bool = false
     @State private var showChatGPTKey: Bool = false
-    @State private var showGeminiKey: Bool = false
-    @State private var showPerplexityKey: Bool = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -424,9 +422,43 @@ struct ConnectionTabView: View {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
             )
+
+            // Browser-extension bridge status (feeds web-session usage via 127.0.0.1:53076)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "puzzlepiece.extension.fill")
+                        .foregroundColor(.secondary)
+                    Text("Browser Extension Bridge")
+                        .font(.system(size: 13, weight: .bold))
+                    HelpButton(
+                        title: "Browser Extension Bridge",
+                        content: "Some platforms only show usage inside their website. The companion browser extension reads usage from your logged-in tabs and POSTs it to this app at 127.0.0.1:53076. Load it from the claude-usage-extension-main folder via chrome://extensions (Developer mode → Load unpacked). Note: ChatGPT does not expose remaining-message counts even internally, and Antigravity is tracked locally instead."
+                    )
+                    Spacer()
+                }
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(state.lastExtensionIngest == nil ? Color.secondary.opacity(0.4) : Color.green)
+                        .frame(width: 8, height: 8)
+                    if let ts = state.lastExtensionIngest {
+                        Text("Last data received \(ts.formatted(date: .omitted, time: .shortened))")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("No extension data received yet")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.3))
+            )
         }
     }
-    
+
     // MARK: - Setup Sub-Views
     
     @ViewBuilder private var claudeSetupView: some View {
@@ -525,11 +557,15 @@ struct ConnectionTabView: View {
             Text("ChatGPT API Tracking (OpenAI)")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(Color(red: 16/255, green: 163/255, blue: 127/255))
-            
+
+            Text("Tracks developer API spend ($) — not ChatGPT Plus message limits.")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+
             HStack(spacing: 8) {
                 Picker("Method", selection: $state.chatgptMethod) {
-                    Text("OpenAI API Key").tag("api_key")
-                    Text("Simulation Mode").tag("simulated")
+                    Text("API spend (Admin key)").tag("api_key")
+                    Text("Manual estimate").tag("simulated")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -539,24 +575,24 @@ struct ConnectionTabView: View {
                 }
                 
                 HelpButton(
-                    title: "ChatGPT Mode Comparison",
-                    content: "• **API Key Mode**: Connects directly to OpenAI's developer endpoints (using your key) to count and summarize your daily token costs.\n• **Simulation Mode**: Adjust sliders to manually simulate monthly and current costs without making external network calls."
+                    title: "ChatGPT tracking modes",
+                    content: "There is no public API for ChatGPT Plus/Pro subscription usage (the message caps). The options below track different things:\n\n• API spend (Admin key): reads your OpenAI developer API cost ($) for the last 30 days via the Costs API. Needs an Admin key (sk-admin-...), not a normal sk- key.\n• Manual estimate: a number you maintain yourself; no network calls."
                 )
             }
             
             if state.chatgptMethod == "api_key" {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Paste your OpenAI API Key (`sk-...`):")
+                    Text("Paste an OpenAI Admin key (`sk-admin-...`):")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
-                    
+
                     HStack(spacing: 8) {
                         if showChatGPTKey {
-                            TextField("sk-...", text: $state.chatgptApiKey)
+                            TextField("sk-admin-...", text: $state.chatgptApiKey)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 11, design: .monospaced))
                         } else {
-                            SecureField("sk-...", text: $state.chatgptApiKey)
+                            SecureField("sk-admin-...", text: $state.chatgptApiKey)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 11, design: .monospaced))
                         }
@@ -569,7 +605,7 @@ struct ConnectionTabView: View {
                     
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("Daily Cost Budget Limit")
+                            Text("Budget limit ($, 30d)")
                                 .font(.system(size: 11))
                             Spacer()
                             Text(String(format: "$%.2f", state.chatgptMonthlyLimit))
@@ -582,7 +618,7 @@ struct ConnectionTabView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("Simulated Monthly Limit")
+                            Text("Monthly budget (manual)")
                                 .font(.system(size: 11))
                             Spacer()
                             Text(String(format: "$%.2f", state.chatgptMonthlyLimit))
@@ -593,7 +629,7 @@ struct ConnectionTabView: View {
                     
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("Simulated Current Usage")
+                            Text("Current usage (manual)")
                                 .font(.system(size: 11))
                             Spacer()
                             Text(String(format: "$%.2f", state.chatgptCurrentUsage))
@@ -616,88 +652,45 @@ struct ConnectionTabView: View {
     
     @ViewBuilder private var geminiSetupView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Gemini API Quota Tracking (Google)")
+            Text("Gemini (Google) — Manual estimate")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(Color(red: 26/255, green: 115/255, blue: 232/255))
-            
+
             HStack(spacing: 8) {
-                Picker("Method", selection: $state.geminiMethod) {
-                    Text("API Quota Tracker").tag("api_key")
-                    Text("Simulation Mode").tag("simulated")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .onChange(of: state.geminiMethod) { _ in
-                    state.saveSettings()
-                    state.refreshUsage()
-                }
-                
+                Text("Google exposes no consumer Gemini usage API — this is a manual estimate.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+
                 HelpButton(
-                    title: "Gemini Mode Comparison",
-                    content: "• **API Quota Tracker**: Automatically tracks Google AI Studio API requests locally (since official endpoints do not report balance keys directly).\n• **Simulation Mode**: Adjust sliders to simulate Google Gemini query counts and daily limits."
+                    title: "Why is Gemini manual?",
+                    content: "Consumer Gemini (Advanced / free tier) usage is not available through any public API — quota lives in Google Cloud Console, not as a live usage feed. So this tile is a manual estimate you maintain yourself. For live numbers, use the browser-extension bridge on a logged-in Gemini tab (best effort)."
                 )
             }
-            
-            if state.geminiMethod == "api_key" {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Enter your Gemini API Key (Quota local tracker):")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    
-                    HStack(spacing: 8) {
-                        if showGeminiKey {
-                            TextField("AIzaSy...", text: $state.geminiApiKey)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 11, design: .monospaced))
-                        } else {
-                            SecureField("AIzaSy...", text: $state.geminiApiKey)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 11, design: .monospaced))
-                        }
-                        Button(action: { showGeminiKey.toggle() }) {
-                            Image(systemName: showGeminiKey ? "eye.slash" : "eye")
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Daily request target")
+                            .font(.system(size: 11))
+                        Spacer()
+                        Text("\(Int(state.geminiDailyLimit)) requests")
+                            .font(.system(size: 11, weight: .bold))
                     }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Daily Limit Quota")
-                                .font(.system(size: 11))
-                            Spacer()
-                            Text("\(Int(state.geminiDailyLimit)) requests")
-                                .font(.system(size: 11, weight: .bold))
-                        }
-                        Slider(value: $state.geminiDailyLimit, in: 100...5000, step: 100)
-                    }
+                    Slider(value: $state.geminiDailyLimit, in: 500...5000, step: 100)
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Simulated Limit Requests")
-                                .font(.system(size: 11))
-                            Spacer()
-                            Text("\(Int(state.geminiDailyLimit)) requests")
-                                .font(.system(size: 11, weight: .bold))
-                        }
-                        Slider(value: $state.geminiDailyLimit, in: 500...5000, step: 100)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Current requests (manual)")
+                            .font(.system(size: 11))
+                        Spacer()
+                        Text("\(Int(state.geminiCurrentUsage)) requests")
+                            .font(.system(size: 11, weight: .bold))
                     }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Simulated Requests Count")
-                                .font(.system(size: 11))
-                            Spacer()
-                            Text("\(Int(state.geminiCurrentUsage)) requests")
-                                .font(.system(size: 11, weight: .bold))
-                        }
-                        Slider(value: $state.geminiCurrentUsage, in: 0...state.geminiDailyLimit, step: 50)
-                    }
+                    Slider(value: $state.geminiCurrentUsage, in: 0...state.geminiDailyLimit, step: 50)
                 }
             }
-            
+
             Button("Save & Apply") {
                 state.saveSettings()
                 state.refreshUsage()
@@ -710,55 +703,25 @@ struct ConnectionTabView: View {
     
     @ViewBuilder private var perplexitySetupView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Perplexity Pro/API Tracking")
+            Text("Perplexity — Manual estimate")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(Color(red: 25/255, green: 161/255, blue: 183/255))
-            
+
             HStack(spacing: 8) {
-                Picker("Method", selection: $state.perplexityMethod) {
-                    Text("Prepaid Balance").tag("api_key")
-                    Text("Simulation Mode").tag("simulated")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .onChange(of: state.perplexityMethod) { _ in
-                    state.saveSettings()
-                    state.refreshUsage()
-                }
-                
+                Text("Perplexity usage and credits are dashboard-only — this is a manual estimate.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+
                 HelpButton(
-                    title: "Perplexity Mode Comparison",
-                    content: "• **Prepaid Balance Mode**: Polls the Perplexity API usage servers directly (using your credentials) to check remaining credit balances.\n• **Simulation Mode**: Run offline and manually adjust slides to represent credit limits."
+                    title: "Why is Perplexity manual?",
+                    content: "Perplexity Pro subscription usage and API credit balance are only visible in the Perplexity dashboard — there is no public endpoint to read them programmatically. So this tile is a manual estimate you maintain yourself."
                 )
             }
-            
+
             VStack(alignment: .leading, spacing: 10) {
-                if state.perplexityMethod == "api_key" {
-                    Text("Enter your Perplexity API Key:")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    
-                    HStack(spacing: 8) {
-                        if showPerplexityKey {
-                            TextField("pplx-...", text: $state.perplexityApiKey)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 11, design: .monospaced))
-                        } else {
-                            SecureField("pplx-...", text: $state.perplexityApiKey)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 11, design: .monospaced))
-                        }
-                        Button(action: { showPerplexityKey.toggle() }) {
-                            Image(systemName: showPerplexityKey ? "eye.slash" : "eye")
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Prepaid Credit Balance Limit")
+                        Text("Credit balance target")
                             .font(.system(size: 11))
                         Spacer()
                         Text(String(format: "$%.2f", state.perplexityLimit))
@@ -766,10 +729,10 @@ struct ConnectionTabView: View {
                     }
                     Slider(value: $state.perplexityLimit, in: 5...50, step: 5)
                 }
-                
+
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Simulated Credits Used")
+                        Text("Credits used (manual)")
                             .font(.system(size: 11))
                         Spacer()
                         Text(String(format: "$%.2f", state.perplexityCurrentUsage))
@@ -778,7 +741,7 @@ struct ConnectionTabView: View {
                     Slider(value: $state.perplexityCurrentUsage, in: 0...state.perplexityLimit, step: 0.5)
                 }
             }
-            
+
             Button("Save & Apply") {
                 state.saveSettings()
                 state.refreshUsage()
@@ -798,7 +761,7 @@ struct ConnectionTabView: View {
             HStack(spacing: 8) {
                 Picker("Method", selection: $state.antigravityMethod) {
                     Text("Live Log Scanner").tag("local_tracker")
-                    Text("Simulation Mode").tag("simulated")
+                    Text("Manual estimate").tag("simulated")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -808,8 +771,8 @@ struct ConnectionTabView: View {
                 }
                 
                 HelpButton(
-                    title: "Antigravity Mode Comparison",
-                    content: "• **Live Log Scanner**: Automatically counts lines matching type 'USER_INPUT' in transcript files at ~/.gemini/antigravity/brain/ to track prompt usage.\n• **Simulation Mode**: Run offline and manually simulate prompt activity."
+                    title: "Antigravity tracking modes",
+                    content: "Antigravity writes local logs, so this is real local activity — but it has no vendor-enforced cap, so the limit below is a target you choose (for the progress bar), not a hard limit.\n\n• Live Log Scanner: counts USER_INPUT lines in transcripts under ~/.gemini/antigravity/brain/.\n• Manual estimate: a number you maintain yourself."
                 )
             }
             
@@ -837,7 +800,7 @@ struct ConnectionTabView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("Simulated Queries limit")
+                            Text("Target queries")
                                 .font(.system(size: 11))
                             Spacer()
                             Text("\(Int(state.antigravityLimit)) queries")
@@ -848,7 +811,7 @@ struct ConnectionTabView: View {
                     
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("Simulated Queries count")
+                            Text("Current queries (manual)")
                                 .font(.system(size: 11))
                             Spacer()
                             Text("\(Int(state.antigravityCurrentUsage)) queries")
@@ -861,7 +824,7 @@ struct ConnectionTabView: View {
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Weekly Query Limit")
+                    Text("Weekly target (queries)")
                         .font(.system(size: 11))
                     Spacer()
                     Text("\(Int(state.antigravityLimit)) queries")

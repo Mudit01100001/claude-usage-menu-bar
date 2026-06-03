@@ -10,7 +10,8 @@ class ProgressMenuItemView: NSView {
     let rawName: String
     let utilization: Double
     let timeRemaining: String
-    
+    let source: String
+
     var brandColor: NSColor {
         if rawName.hasPrefix("chatgpt") {
             return NSColor(red: 16/255, green: 163/255, blue: 127/255, alpha: 1.0)
@@ -30,12 +31,33 @@ class ProgressMenuItemView: NSView {
         else if utilization >= 75 { return .systemOrange }
         else { return brandColor }
     }
+
+    // Honest provenance tag shown next to the title.
+    var sourceTag: String {
+        switch source {
+        case "live_subscription": return "LIVE"
+        case "live_local": return "LOCAL"
+        case "live_api_cost": return "API $"
+        case "extension": return "EXT"
+        case "manual": return "MANUAL"
+        default: return "LIVE"
+        }
+    }
+
+    var sourceTagColor: NSColor {
+        switch source {
+        case "manual": return .tertiaryLabelColor
+        case "extension": return .systemTeal
+        default: return .systemGreen
+        }
+    }
     
-    init(bucketName: String, rawName: String, utilization: Double, timeRemaining: String) {
+    init(bucketName: String, rawName: String, utilization: Double, timeRemaining: String, source: String) {
         self.bucketName = bucketName
         self.rawName = rawName
         self.utilization = utilization
         self.timeRemaining = timeRemaining
+        self.source = source
         super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 44))
     }
     
@@ -51,13 +73,21 @@ class ProgressMenuItemView: NSView {
         let pad: CGFloat = 16
         let rPad: CGFloat = 16
         
-        // Row 1: Title (left) + Percentage (right, bold, colored)
+        // Row 1: Title (left) + source tag + Percentage (right, bold, colored)
         let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
             .foregroundColor: NSColor.labelColor
         ]
-        NSAttributedString(string: bucketName, attributes: titleAttrs)
-            .draw(at: NSPoint(x: pad, y: bounds.height - 20))
+        let titleAS = NSAttributedString(string: bucketName, attributes: titleAttrs)
+        titleAS.draw(at: NSPoint(x: pad, y: bounds.height - 20))
+
+        // Source provenance tag (LIVE / LOCAL / API $ / MANUAL / EXT) right after the title.
+        let tagAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 8, weight: .bold),
+            .foregroundColor: sourceTagColor
+        ]
+        NSAttributedString(string: sourceTag, attributes: tagAttrs)
+            .draw(at: NSPoint(x: pad + titleAS.size().width + 6, y: bounds.height - 19))
         
         let pctStr = "\(Int(utilization))%"
         let pctAttrs: [NSAttributedString.Key: Any] = [
@@ -414,7 +444,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                                 bucketName: bucket.displayName,
                                 rawName: bucket.name,
                                 utilization: bucket.utilization,
-                                timeRemaining: bucket.timeRemainingString
+                                timeRemaining: bucket.timeRemainingString,
+                                source: bucket.source
                             )
                             let menuItem = NSMenuItem()
                             menuItem.view = progressView
@@ -430,7 +461,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                                 bucketName: bucket.displayName,
                                 rawName: bucket.name,
                                 utilization: bucket.utilization,
-                                timeRemaining: bucket.timeRemainingString
+                                timeRemaining: bucket.timeRemainingString,
+                                source: bucket.source
                             )
                             let menuItem = NSMenuItem()
                             menuItem.view = progressView
@@ -446,7 +478,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                                 bucketName: bucket.displayName,
                                 rawName: bucket.name,
                                 utilization: bucket.utilization,
-                                timeRemaining: bucket.timeRemainingString
+                                timeRemaining: bucket.timeRemainingString,
+                                source: bucket.source
                             )
                             let menuItem = NSMenuItem()
                             menuItem.view = progressView
@@ -462,7 +495,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                                 bucketName: bucket.displayName,
                                 rawName: bucket.name,
                                 utilization: bucket.utilization,
-                                timeRemaining: bucket.timeRemainingString
+                                timeRemaining: bucket.timeRemainingString,
+                                source: bucket.source
                             )
                             let menuItem = NSMenuItem()
                             menuItem.view = progressView
@@ -478,7 +512,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                                 bucketName: bucket.displayName,
                                 rawName: bucket.name,
                                 utilization: bucket.utilization,
-                                timeRemaining: bucket.timeRemainingString
+                                timeRemaining: bucket.timeRemainingString,
+                                source: bucket.source
                             )
                             let menuItem = NSMenuItem()
                             menuItem.view = progressView

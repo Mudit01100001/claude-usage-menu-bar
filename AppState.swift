@@ -142,6 +142,7 @@ class AppState: ObservableObject {
     
     init() {
         loadSettings()
+        runHonestyMigrationIfNeeded()
         // Try to load cached buckets
         if let data = UserDefaults.standard.data(forKey: "cachedBuckets"),
            let decoded = try? JSONDecoder().decode([UsageBucket].self, from: data) {
@@ -230,7 +231,27 @@ class AppState: ObservableObject {
             self.perplexityApiKey = key
         }
     }
-    
+
+    /// One-time upgrade step. Earlier builds showed fabricated "live" numbers for
+    /// ChatGPT/Gemini/Perplexity, and many users enabled them under that false
+    /// impression. Now that those tiles are honest opt-in (manual / API-cost only),
+    /// switch them off once so they become an explicit choice. Antigravity is real
+    /// local data and is left untouched. Runs once; after this the user may freely
+    /// re-enable any provider and it will persist normally.
+    private func runHonestyMigrationIfNeeded() {
+        let migrationKey = "honestMigrationV1Done"
+        guard !UserDefaults.standard.bool(forKey: migrationKey) else { return }
+
+        self.chatgptEnabled = false
+        self.geminiEnabled = false
+        self.perplexityEnabled = false
+        UserDefaults.standard.set(false, forKey: "chatgptEnabled")
+        UserDefaults.standard.set(false, forKey: "geminiEnabled")
+        UserDefaults.standard.set(false, forKey: "perplexityEnabled")
+
+        UserDefaults.standard.set(true, forKey: migrationKey)
+    }
+
     func saveSettings() {
         UserDefaults.standard.set(selectedMethod, forKey: "selectedMethod")
         UserDefaults.standard.set(pollingInterval, forKey: "pollingInterval")

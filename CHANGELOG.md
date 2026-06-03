@@ -4,6 +4,24 @@ All notable changes to the Claude Usage macOS Menu Bar App will be documented in
 
 ---
 
+## [1.4.0] - 2026-06-03
+
+### Fixed
+- **Claude reliability restored:** the multi-provider release had added a hard 5-second timeout to every network request. Claude's web path makes two sequential calls (org lookup → usage), so any slow response silently blanked the menu bar to `--%`. Timeout relaxed to 15s.
+- **Thread-safety:** per-provider usage buckets were written on URLSession background threads while being read on the main thread, which could intermittently blank out Claude. All bucket writes now happen on the main thread.
+- **Actionable errors:** expired session key / timeout now show a specific message in the dropdown instead of silently showing no data.
+
+### Added
+- **Honest data-source tags:** every usage row is tagged by provenance — **LIVE** (Claude subscription), **LOCAL** (Antigravity logs), **API $** (real developer API spend), **MANUAL** (user estimate), **EXT** (browser extension). Shown next to each entry in the dropdown.
+- **Browser-extension bridge:** the app's local server now accepts `POST /ingest` (with CORS + preflight) so the companion extension can push real web-session usage. The extension (`claude-usage-extension-main/`) reads logged-in tabs and relays via its background worker. Consolidation prefers real data, falling back to extension data.
+- **OpenAI Costs API (opt-in):** ChatGPT "API spend" mode now calls the correct Costs endpoint with an Admin key, clearly labeled as developer API spend — not ChatGPT Plus message limits (which have no API).
+
+### Changed
+- **Removed fabricated "simulated" numbers.** ChatGPT/Gemini/Perplexity no longer display invented live data. Gemini and Perplexity are honest manual-estimate tiles (no consumer usage API exists); their dead "API key" modes were removed. Antigravity's limit is reframed as a user-set target (it has no vendor-enforced cap).
+- **One-time migration:** on upgrade, ChatGPT/Gemini/Perplexity are switched off once (they had been enabled under the old fake-data behavior). Antigravity is untouched. Re-enable any provider afterward and it persists.
+
+---
+
 ## [1.3.0] - 2026-05-30
 
 ### Added

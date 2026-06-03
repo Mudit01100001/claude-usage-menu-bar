@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Packed extension
+*.crx
+*.pem
+*.zip

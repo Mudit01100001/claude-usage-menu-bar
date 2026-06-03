@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Setup View -->
+    <div id="setup" class="view hidden">
+      <h2>Setup Required</h2>
+      <p>Paste your Claude OAuth token:</p>
+      <textarea id="token-input" placeholder="sk-ant-oat01-..."></textarea>
+      <p class="help">
+        Find it in:<br>
+        <strong>macOS:</strong> Run in terminal:<br>
+        <code>security find-generic-password -s "Claude Code-credentials" -w</code><br><br>
+        <strong>Windows:</strong><br>
+        <code>%APPDATA%\Claude\credentials.json</code><br><br>
+        <strong>Linux:</strong><br>
+        <code>~/.config/claude/credentials.json</code>
+      </p>
+      <button id="save-token">Save Token</button>
+    </div>
+
+    <!-- Usage View -->
+    <div id="usage" class="view hidden">
+      <div class="usage-item">
+        <span class="label">5-hour</span>
+        <span id="five-hour" class="value">--</span>
+      </div>
+      <div class="usage-item">
+        <span class="label">Weekly</span>
+        <span id="weekly" class="value">--</span>
+      </div>
+      <div class="usage-item">
+        <span class="label">Sonnet</span>
+        <span id="sonnet" class="value">--</span>
+      </div>
+      <hr>
+      <div class="usage-item">
+        <span class="label">Extra</span>
+        <span id="extra" class="value">--</span>
+      </div>
+      <hr>
+      <div class="usage-item small">
+        <span class="label">Updated</span>
+        <span id="updated" class="value">--</span>
+      </div>
+      <div class="actions">
+        <button id="refresh">Refresh</button>
+        <select id="interval">
+          <option value="60">1 min</option>
+          <option value="300" selected>5 min</option>
+          <option value="1800">30 min</option>
+          <option value="3600">1 hour</option>
+        </select>
+        <button id="settings" class="icon-btn" title="Settings">⚙️</button>
+      </div>
+    </div>
+
+    <!-- Settings View -->
+    <div id="settings-view" class="view hidden">
+      <h2>Settings</h2>
+      <button id="clear-token" class="danger">Clear Token & Reset</button>
+      <button id="back">← Back</button>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="view">
+      <div class="spinner"></div>
+    </div>
+
+    <!-- Error -->
+    <div id="error" class="view hidden">
+      <p class="error-msg">Failed to fetch usage</p>
+      <button id="retry">Retry</button>
+      <button id="reauth">Re-enter Token</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -129,6 +129,48 @@ class ProgressMenuItemView: NSView {
     }
 }
 
+// MARK: - Wrapping Warning Menu Item View
+// A plain NSMenuItem.attributedTitle never wraps, so a long error message forces the
+// whole NSMenu to grow as wide as the text. This wraps at the same 280pt width as
+// ProgressMenuItemView's rows and grows vertically instead.
+
+class WarningMenuItemView: NSView {
+    private let attrString: NSAttributedString
+    private let textRect: NSRect
+
+    static let viewWidth: CGFloat = 280
+    static let hPad: CGFloat = 16
+    static let vPad: CGFloat = 10
+
+    init(message: String) {
+        let textWidth = Self.viewWidth - Self.hPad * 2
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10),
+            .foregroundColor: NSColor.systemRed
+        ]
+        let str = NSAttributedString(string: "⚠ \(message)", attributes: attrs)
+        self.attrString = str
+
+        let bounding = str.boundingRect(
+            with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let textHeight = ceil(bounding.height)
+        self.textRect = NSRect(x: Self.hPad, y: Self.vPad, width: textWidth, height: textHeight)
+
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.viewWidth, height: textHeight + Self.vPad * 2))
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var intrinsicContentSize: NSSize { frame.size }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        attrString.draw(with: textRect, options: [.usesLineFragmentOrigin, .usesFontLeading])
+    }
+}
+
 // MARK: - Settings Window Controller
 
 class SettingsWindowController: NSWindowController {
@@ -166,6 +208,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
     var pollingTimer: Timer?
     var cancellables = Set<AnyCancellable>()
     var lastNotifiedUtilization: [String: Double] = [:]
+    var lastKnownResetsAt: [String: Date] = [:]
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -251,6 +294,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
             .sink { [weak self] _ in
                 self?.updateMenuBarDisplay()
                 self?.checkThresholdsAndNotify()
+                self?.checkForResetsAndNotify()
             }
             .store(in: &cancellables)
     }
@@ -271,48 +315,47 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         else { return .labelColor }
     }
     
-    func getPrimaryDisplayValues() -> (title: String, percentage: Int, detailText: String, brandChar: String) {
+    func getPrimaryDisplayValues() -> (title: String, percentage: Int, detailText: String, brandChar: String, hasData: Bool) {
         let provider = appState.primaryProvider
         if provider == "claude" {
             let session = getSessionBucket()
             let pct = session.map { Int($0.utilization) } ?? 0
             let weekly = getWeeklyBucket()
             let weeklyPct = weekly.map { Int($0.utilization) } ?? 0
-            return ("Claude", pct, "W:\(weeklyPct)%", "C")
+            return ("Claude", pct, "W:\(weeklyPct)%", "C", session != nil || weekly != nil)
         } else if provider == "chatgpt" {
             let bucket = appState.usageBuckets.first(where: { $0.name == "chatgpt_api" })
             let pct = bucket.map { Int($0.utilization) } ?? 0
-            return ("ChatGPT", pct, bucket?.resetsAt ?? "$--", "G")
+            return ("ChatGPT", pct, bucket?.resetsAt ?? "$--", "G", bucket != nil)
         } else if provider == "gemini" {
             let bucket = appState.usageBuckets.first(where: { $0.name == "gemini_api" })
             let pct = bucket.map { Int($0.utilization) } ?? 0
-            return ("Gemini", pct, "\(Int(appState.geminiCurrentUsage)) req", "M")
+            return ("Gemini", pct, "\(Int(appState.geminiCurrentUsage)) req", "M", bucket != nil)
         } else if provider == "perplexity" {
             let bucket = appState.usageBuckets.first(where: { $0.name == "perplexity_api" })
             let pct = bucket.map { Int($0.utilization) } ?? 0
-            return ("Perplexity", pct, bucket?.resetsAt ?? "$--", "P")
+            return ("Perplexity", pct, bucket?.resetsAt ?? "$--", "P", bucket != nil)
         } else if provider == "antigravity" {
             let bucket = appState.usageBuckets.first(where: { $0.name == "antigravity_usage" })
             let pct = bucket.map { Int($0.utilization) } ?? 0
-            return ("Antigravity", pct, "\(Int(appState.antigravityCurrentUsage)) q", "A")
+            return ("Antigravity", pct, "\(Int(appState.antigravityCurrentUsage)) q", "A", bucket != nil)
         } else {
             let claudeSession = getSessionBucket()
             let cPct = claudeSession.map { Int($0.utilization) } ?? 0
             if let other = appState.usageBuckets.first(where: { $0.name != "five_hour" && $0.name != "seven_day" && $0.name != "extra_usage" }) {
-                return ("Hybrid", cPct, "\(other.displayName.prefix(3)):\(Int(other.utilization))%", "H")
+                return ("Hybrid", cPct, "\(other.displayName.prefix(3)):\(Int(other.utilization))%", "H", true)
             } else {
                 let weekly = getWeeklyBucket()
                 let weeklyPct = weekly.map { Int($0.utilization) } ?? 0
-                return ("Hybrid", cPct, "W:\(weeklyPct)%", "H")
+                return ("Hybrid", cPct, "W:\(weeklyPct)%", "H", claudeSession != nil || weekly != nil)
             }
         }
     }
-    
+
     @objc func updateMenuBarDisplay() {
         guard let button = statusItem?.button else { return }
-        
-        let (_, pPct, pDetail, pChar) = getPrimaryDisplayValues()
-        let hasData = !appState.usageBuckets.isEmpty
+
+        let (_, pPct, pDetail, pChar, hasData) = getPrimaryDisplayValues()
         
         // Icon
         if appState.showMenuBarIcon {
@@ -403,17 +446,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         ])
         menu.addItem(headerItem)
         
-        if appState.usageBuckets.isEmpty {
+        // Show the error banner whenever one exists, even if other providers still have
+        // data — a partial failure (e.g. Claude's token expired but a manual Perplexity
+        // estimate is still present) must not be hidden just because the bucket list
+        // as a whole isn't empty.
+        if let error = appState.errorMessage {
             menu.addItem(NSMenuItem.separator())
-            if let error = appState.errorMessage {
-                let errorItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-                errorItem.isEnabled = false
-                errorItem.attributedTitle = NSAttributedString(string: "⚠ \(error)", attributes: [
-                    .font: NSFont.systemFont(ofSize: 10),
-                    .foregroundColor: NSColor.systemRed
-                ])
-                menu.addItem(errorItem)
-            } else {
+            let errorItem = NSMenuItem()
+            errorItem.view = WarningMenuItemView(message: error)
+            menu.addItem(errorItem)
+        }
+
+        if appState.usageBuckets.isEmpty {
+            if appState.errorMessage == nil {
+                menu.addItem(NSMenuItem.separator())
                 let noDataItem = NSMenuItem(title: "No usage data yet", action: nil, keyEquivalent: "")
                 noDataItem.isEnabled = false
                 menu.addItem(noDataItem)
@@ -623,6 +669,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         }
     }
     
+    // Fires when a bucket's server-reported reset time rolls over to a new window,
+    // e.g. the 5-hour session limit or 7-day weekly limit refreshing. Uses the
+    // authoritative `resetsAt` timestamp from the API rather than inferring from a
+    // utilization drop, since a manual/estimated bucket can sit at 0% without resetting.
+    func checkForResetsAndNotify() {
+        guard appState.enableNotifications else { return }
+
+        for bucket in appState.usageBuckets {
+            guard let currentResetsAt = bucket.resetsAtDate else { continue }
+
+            if let previousResetsAt = lastKnownResetsAt[bucket.name] {
+                let windowRolledOver = previousResetsAt <= Date() && currentResetsAt > previousResetsAt
+                if windowRolledOver {
+                    let content = UNMutableNotificationContent()
+                    content.title = "\(bucket.displayName) Reset"
+                    content.body = "Your \(bucket.displayName.lowercased()) limit has refreshed \u{2014} fresh capacity is available."
+                    content.sound = .default
+
+                    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+                    let request = UNNotificationRequest(identifier: "ClaudeUsage-reset-\(bucket.name)", content: content, trigger: trigger)
+                    UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+                }
+            }
+
+            lastKnownResetsAt[bucket.name] = currentResetsAt
+        }
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
     }

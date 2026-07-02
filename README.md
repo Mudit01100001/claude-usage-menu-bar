@@ -9,7 +9,7 @@
 </h1>
 
 <p align="center">
-  A lightweight, native macOS status bar app that tracks your rolling <strong>Claude.ai session limits</strong> and <strong>weekly usage</strong> in real-time — with an optional desktop widget.<br>
+  A lightweight, native macOS status bar app that tracks your rolling <strong>Claude.ai session limits</strong> and <strong>weekly usage</strong> in real-time.<br>
   Built entirely in Swift (AppKit + SwiftUI + WidgetKit). Zero Xcode project files. Compiles in seconds.
 </p>
 
@@ -44,14 +44,12 @@ Click the menu bar icon to see:
 - **Claude Web Session** — Connect using your browser `sessionKey` cookie
 - **Claude Code CLI** — Automatically scans your system Keychain for OAuth credentials from `claude login`
 
-### 🧩 Native Desktop Widget (v1.1.0+)
-A polished 2×2 WidgetKit widget designed in the Apple battery widget style:
-- **Session Limit** ring + time remaining (left)
-- **Weekly Limit** ring + time remaining (right)
-- Zero-latency sync with the menu bar app via App Group shared containers
+### 🧩 Native Desktop Widget (Coming Soon)
+A polished 2×2 WidgetKit widget designed in the Apple battery widget style — **Session Limit** ring + time remaining on the left, **Weekly Limit** ring + time remaining on the right. The code is built and ready ([ClaudeUsageWidget.swift](ClaudeUsageWidget.swift)), but macOS won't register a WidgetKit extension in the Widget Gallery unless it's signed with a paid Apple Developer ID and notarized — see [Desktop Widget](#desktop-widget) below.
 
 ### 🔔 System Notifications
-Native macOS alerts when any limit exceeds a configurable threshold (default: 80%).
+- Threshold alerts when any limit exceeds a configurable percentage (default: 80%)
+- Reset alerts when your 5-hour session or 7-day weekly window actually rolls over, based on the server-reported reset time — not just a menu bar color change
 
 ### ⚙️ Smart Preferences
 - Configurable refresh interval (default: 5 min)
@@ -96,16 +94,11 @@ The app runs as a status-item accessory (`LSUIElement = true`) — it lives in t
 
 ## Desktop Widget
 
-The 2×2 WidgetKit widget requires:
-- macOS 14 (Sonoma) or later
-- The main app to be launched at least once (registers the plugin with macOS)
+**Status: Coming Soon — not available in the default build.**
 
-**Adding the widget:**
-1. Right-click your macOS desktop and choose **Edit Widgets…**
-2. Search for **"Claude Usage"** in the gallery
-3. Drag the **2×2 progress ring** widget to your desktop or Notification Center
+The widget's code is fully implemented ([ClaudeUsageWidget.swift](ClaudeUsageWidget.swift)) and compiles as part of `build.sh`, but macOS will not list it in the Widget Gallery under the ad-hoc code signing this repo ships with. This isn't a bug to work around — it's an intentional macOS security policy: `chronod` (the system service that manages the Widget Gallery) only registers a WidgetKit extension if the containing app is either running under Xcode's debugger, or signed with a paid **Apple Developer ID** certificate and **notarized** by Apple. A free personal-team certificate isn't enough, and macOS 15+ removed the CLI workarounds that used to paper over this. See [Troubleshooting](#troubleshooting) for the full diagnosis if you're curious.
 
-Data syncs automatically whenever the menu bar app refreshes.
+This will be revisited once the project can justify the $99/year Apple Developer Program membership required for a Developer ID certificate + notarization — at that point it's purely a signing/distribution change, no code changes needed.
 
 ---
 
@@ -130,26 +123,19 @@ No — the app reads the stored OAuth token. Your terminal can be fully closed.
 
 **The widget doesn't appear in the Widget Gallery.**  
 
-Under ad-hoc code signing (default in `build.sh` via `codesign -s -`), macOS enforces strict security restrictions on WidgetKit extensions:
-1. **App Groups & Sandboxing**: Without a valid Apple Developer Account Team ID, macOS rejects App Group containers (`com.apple.security.application-groups`). The app has been updated to bypass this by running a lightweight local HTTP server (`127.0.0.1:53076`) in the menu bar app, which the widget queries directly.
-2. **Widget Gallery Visibility**: Even with the App Group bypass, macOS system daemon `chronod` frequently ignores or fails to load ad-hoc signed app extensions in the Widget Gallery.
+This is expected under the default ad-hoc code signing (`codesign -s -`) — see [Desktop Widget](#desktop-widget) above. In short: `chronod` (the system service behind the Widget Gallery) refuses to register a WidgetKit extension unless the containing app is signed with a paid Apple Developer ID and notarized, or is actively running under Xcode's debugger. Two things were tried and ruled out, in case you're investigating this yourself:
+1. **App Groups & Sandboxing**: Without a valid Apple Developer Account Team ID, macOS rejects App Group containers (`com.apple.security.application-groups`), so the app bypasses this with a lightweight local HTTP server (`127.0.0.1:53076`) in the menu bar app, which the widget queries directly. This part works fine on its own.
+2. **Signing with a free "Apple Development" personal-team certificate instead of ad-hoc** was tested directly and still failed — `chronod` logs `LS doesn't have a containing bundle` and `spctl -a` reports the app as Gatekeeper-`rejected`. On macOS 15+, the old `spctl --add` CLI workaround to manually whitelist it was also removed by Apple. There is no remaining free/local fix; it requires a paid Developer ID certificate + notarization.
 
-**Known Workarounds / Diagnostics:**
-- Check system logs for registration errors:
-  ```bash
-  log show --predicate 'sender == "chronod" || process == "chronod"' --last 10m
-  ```
-- Force re-register and restart `chronod`:
-  ```bash
-  # Unregister and re-register
-  pluginkit -r /Applications/ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex
-  pluginkit -a /Applications/ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex
-  pluginkit -e use -i com.mudit.ClaudeUsage.Widget
-  
-  # Restart widget daemon
-  pkill -f chronod
-  ```
-- **Recommended Solution**: Open `build.sh`, change `-s -` to your own Apple Developer Certificate Name (e.g., `"Apple Development: your@email.com"`), restore App Group entitlements with your Team ID in the entitlements files, and rebuild. Proper developer signatures solve all Widget Gallery registration issues.
+If you want to poke at the diagnostics yourself:
+```bash
+# Check system logs for registration errors
+log show --predicate 'sender == "chronod" || process == "chronod"' --last 10m
+
+# Force re-register the extension
+pluginkit -r /Applications/ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex
+pluginkit -a /Applications/ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex
+```
 
 **Refresh fails / data not updating.**  
 Open Settings → Connection. For web sessions, the `sessionKey` cookie expires after a few weeks — grab a fresh one from your browser. For CLI, run `claude logout && claude login`.

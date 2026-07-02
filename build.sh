@@ -66,6 +66,9 @@ echo "Cleaning bundle metadata..."
 xattr -cr ClaudeUsage.app
 
 # Code signing (Hierarchical order: inner plugins first, then outer app bundle)
+# Ad-hoc signing ("-") keeps this buildable by anyone who clones the repo, with no
+# Apple Developer account required. Note: the desktop widget will not appear in the
+# Widget Gallery under ad-hoc signing — see README troubleshooting section.
 echo "Signing Widget extension..."
 codesign --force --sign - --entitlements widget.entitlements ClaudeUsage.app/Contents/PlugIns/ClaudeUsageWidget.appex
 
